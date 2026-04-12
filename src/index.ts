@@ -32,8 +32,8 @@ process.on('uncaughtException', (err) => {
   console.error('uncaughtException:', err.message);
 });
 
-// Inicializa o servidor
-app.listen(PORT, () => {
+// Inicializa o servidor — bind explícito em 0.0.0.0 para funcionar no Railway
+app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`Mig rodando na porta ${PORT}`);
 
   // Inicia o bot do Telegram
