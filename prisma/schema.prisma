@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Histórico de mensagens por chat (Telegram ou web)
+model Message {
+  id        Int      @id @default(autoincrement())
+  chatId    String
+  role      String   // "user" | "model"
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([chatId, createdAt])
+}
+
+// Configurações por usuário/chat
+model Config {
+  id        Int      @id @default(autoincrement())
+  chatId    String   @unique
+  key       String
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@index([chatId])
+}
