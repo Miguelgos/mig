@@ -1,6 +1,8 @@
 import 'dotenv/config';
 // Necessário no WSL por problema de certificados SSL locais
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
 import express from 'express';
 import path from 'path';
 import { chatRouter } from './routes/chat';
@@ -19,6 +21,15 @@ app.use('/api/chat', chatRouter);
 // Health check para Railway
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Impede que rejeições não tratadas derrubem o processo
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err.message);
 });
 
 // Inicializa o servidor
