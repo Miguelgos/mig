@@ -139,12 +139,17 @@ async function loginViaPuppeteer(): Promise<string> {
 
     // Clica "Continuar" — busca pelo texto para não acertar outro submit button da página
     console.log('cartola: clicando Continuar...');
-    await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button[type="submit"]')]
-        .find((b) => b.textContent?.includes('Continuar'));
-      if (!btn) throw new Error('Botão Continuar não encontrado na página.');
-      (btn as HTMLElement).click();
-    });
+    const submitButtons = await page.$$('button[type="submit"]');
+    let continuarClicked = false;
+    for (const btn of submitButtons) {
+      const text = await btn.evaluate((el) => el.textContent ?? '');
+      if (text.includes('Continuar')) {
+        await btn.click();
+        continuarClicked = true;
+        break;
+      }
+    }
+    if (!continuarClicked) throw new Error('Botão Continuar não encontrado na página.');
 
     // 3. Etapa de senha — aguarda o campo aparecer (type="password" é mais robusto que name)
     console.log('cartola: aguardando campo de senha...');
@@ -155,17 +160,33 @@ async function loginViaPuppeteer(): Promise<string> {
 
     // Clica "Entrar" — busca pelo texto igual ao Continuar
     console.log('cartola: clicando Entrar...');
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-        console.log('cartola: timeout aguardando redirect pós-login');
-      }),
-      page.evaluate(() => {
-        const btn = [...document.querySelectorAll('button[type="submit"]')]
-          .find((b) => b.textContent?.includes('Entrar'));
-        if (btn) (btn as HTMLElement).click();
-        else (document.querySelector('button[type="submit"]') as HTMLElement | null)?.click();
-      }),
-    ]);
+    const submitButtons2 = await page.$$('button[type="submit"]');
+    let entrarClicked = false;
+    for (const btn of submitButtons2) {
+      const text = await btn.evaluate((el) => el.textContent ?? '');
+      if (text.includes('Entrar')) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+            console.log('cartola: timeout aguardando redirect pós-login');
+          }),
+          btn.click(),
+        ]);
+        entrarClicked = true;
+        break;
+      }
+    }
+    if (!entrarClicked) {
+      // Fallback: clica no primeiro submit disponível
+      const fallback = await page.$('button[type="submit"]');
+      if (fallback) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+            console.log('cartola: timeout aguardando redirect pós-login (fallback)');
+          }),
+          fallback.click(),
+        ]);
+      }
+    }
 
     console.log('cartola: URL final:', page.url());
 
