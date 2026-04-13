@@ -137,25 +137,34 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.click('input[name="email"]');
     await page.type('input[name="email"]', email, { delay: 60 });
 
-    // Clica "Continuar" — a transição e-mail→senha é SPA (sem reload completo)
+    // Clica "Continuar" — busca pelo texto para não acertar outro submit button da página
     console.log('cartola: clicando Continuar...');
-    await page.click('button[type="submit"]');
+    await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button[type="submit"]')]
+        .find((b) => b.textContent?.includes('Continuar'));
+      if (!btn) throw new Error('Botão Continuar não encontrado na página.');
+      (btn as HTMLElement).click();
+    });
 
-    // 3. Etapa de senha — aguarda o campo de senha aparecer
+    // 3. Etapa de senha — aguarda o campo aparecer (type="password" é mais robusto que name)
     console.log('cartola: aguardando campo de senha...');
-    await page.waitForSelector('input[name="password"]', { timeout: 20000 });
+    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
     console.log('cartola: URL na tela de senha:', page.url());
 
-    await page.type('input[name="password"]', senha, { delay: 60 });
+    await page.type('input[type="password"]', senha, { delay: 60 });
 
-    // Clica "Entrar" e aguarda redirect de volta para cartola.globo.com
+    // Clica "Entrar" — busca pelo texto igual ao Continuar
     console.log('cartola: clicando Entrar...');
-    const btnEntrar = await page.$('button[type="submit"]');
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
         console.log('cartola: timeout aguardando redirect pós-login');
       }),
-      btnEntrar ? btnEntrar.click() : page.keyboard.press('Enter'),
+      page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button[type="submit"]')]
+          .find((b) => b.textContent?.includes('Entrar'));
+        if (btn) (btn as HTMLElement).click();
+        else (document.querySelector('button[type="submit"]') as HTMLElement | null)?.click();
+      }),
     ]);
 
     console.log('cartola: URL final:', page.url());
