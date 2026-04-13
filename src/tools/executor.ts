@@ -1,5 +1,6 @@
 import { sugerirTime, consultarPontuacao, statusMercado } from '../services/cartola';
 import { buscarComunicados } from '../services/escola';
+import { enviarAgenda } from '../services/email';
 
 /**
  * Executa uma tool call retornada pelo Gemini.
@@ -25,6 +26,22 @@ export async function executeTool(
       case 'status_mercado_cartola': {
         const resultado = await statusMercado();
         return JSON.stringify(resultado);
+      }
+
+      case 'verificar_escola_agora': {
+        const { filtrarImportantesExport } = await import('../crons');
+        const todos = await buscarComunicados(10);
+        const importantes = await filtrarImportantesExport(todos);
+        const comData = importantes.filter((c) => c.data);
+        let enviados = 0;
+        if (comData.length > 0) enviados = await enviarAgenda(comData);
+        return JSON.stringify({
+          total: todos.length,
+          importantes: importantes.length,
+          emailEnviado: enviados > 0,
+          eventos: enviados,
+          comunicados: importantes,
+        });
       }
 
       case 'comunicados_escola': {

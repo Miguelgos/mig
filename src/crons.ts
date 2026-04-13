@@ -107,6 +107,10 @@ async function verificarComunicadosEscola(): Promise<void> {
 }
 
 /** Usa Gemini para filtrar apenas os comunicados relevantes/urgentes. */
+export async function filtrarImportantesExport(comunicados: Comunicado[]): Promise<Comunicado[]> {
+  return filtrarImportantes(comunicados);
+}
+
 async function filtrarImportantes(comunicados: Comunicado[]): Promise<Comunicado[]> {
   const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
 

@@ -41,6 +41,16 @@ export const toolDefinitions: FunctionDeclaration[] = [
     },
   },
   {
+    name: 'verificar_escola_agora',
+    description:
+      'Verifica os comunicados da escola do Lucas agora mesmo, filtra os importantes e envia agenda por e-mail para os que tiverem data.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'comunicados_escola',
     description:
       'Busca os comunicados mais recentes da escola do Lucas no portal Layers Digital. Retorna título, autor, data e resumo de cada comunicado.',
