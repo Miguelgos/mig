@@ -125,28 +125,102 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Navega ao Cartola e segue o redirect natural para o Globo ID
-    console.log('cartola: abrindo cartola.globo.com para seguir redirect de login...');
-    await page.goto(CARTOLA_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-    console.log('cartola: URL após goto cartola:', page.url());
+    // Intercepta navegações para diagnóstico — revela para onde o botão "Entrar" redireciona
+    page.on('request', (req) => {
+      if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+        console.log('cartola: navegação →', req.url().slice(0, 120));
+      }
+    });
 
-    // Se ainda estiver no cartola (usuário já logado ou sem redirect), força login
-    if (page.url().includes('cartola.globo.com') && !page.url().includes('login')) {
-      console.log('cartola: não redirecionou para login, tentando URL direta...');
-      await page.goto('https://login.globo.com/login/43', { waitUntil: 'networkidle2', timeout: 30000 });
-      console.log('cartola: URL após goto login direto:', page.url());
+    // 1. Navega ao Cartola (aterrissa em #!/antessala sem redirecionar para login)
+    console.log('cartola: navegando para cartola.globo.com...');
+    await page.goto(CARTOLA_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('cartola: URL atual:', page.url());
+
+    // 2. Loga todos os links/botões para diagnóstico
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pageLinks = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (globalThis as any).document;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return Array.from(doc.querySelectorAll('a, button, [role="button"]')).map((el: any) => ({
+        tag: el.tagName,
+        text: (el.textContent ?? '').trim().slice(0, 50),
+        href: el.href ?? '',
+        id: el.id ?? '',
+        cls: (el.className ?? '').toString().slice(0, 60),
+      }));
+    });
+    console.log('cartola: links/botões na página:', JSON.stringify(pageLinks));
+
+    // 3. Tenta obter o href do botão de login para navegar diretamente
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loginHref = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (globalThis as any).document;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const links = Array.from(doc.querySelectorAll('a')) as any[];
+      const found = links.find((el: any) =>
+        /entrar|login|sign.?in/i.test((el.textContent ?? '') + el.href)
+      );
+      return found?.href ?? null;
+    });
+
+    if (loginHref && !loginHref.includes('cartola.globo.com')) {
+      // Link externo de login encontrado — navega direto
+      console.log('cartola: link de login encontrado:', loginHref.slice(0, 120));
+      await page.goto(loginHref, { waitUntil: 'networkidle2', timeout: 30000 });
+    } else {
+      // Tenta clicar em botão/link pelo texto "Entrar" ou "Login"
+      const loginSelectors = [
+        'a[href*="login"]',
+        'a[href*="entrar"]',
+        'a[href*="signin"]',
+        'button[class*="login"]',
+        'button[class*="entrar"]',
+        '[data-action*="login"]',
+      ];
+
+      let clicked = false;
+      for (const sel of loginSelectors) {
+        const el = await page.$(sel);
+        if (el) {
+          console.log('cartola: clicando login com seletor:', sel);
+          await Promise.all([
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+              console.log('cartola: timeout aguardando redirect de login');
+            }),
+            el.click(),
+          ]);
+          clicked = true;
+          break;
+        }
+      }
+
+      if (!clicked) {
+        // Último recurso: login.globo.com sem service ID (endpoint base)
+        console.log('cartola: botão de login não encontrado, tentando login.globo.com...');
+        await page.goto('https://login.globo.com/', { waitUntil: 'networkidle2', timeout: 30000 });
+      }
     }
 
-    // Dump HTML para diagnóstico — ajuda a entender o que o Globo renderiza
+    console.log('cartola: URL após navegar para login:', page.url());
+
+    // 4. Dump HTML da página de login para diagnóstico
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const htmlSnippet = await page.evaluate(() => (globalThis as any).document.documentElement.outerHTML.slice(0, 3000));
-    console.log('cartola: HTML (primeiros 3000 chars):', htmlSnippet);
+    console.log('cartola: HTML login (primeiros 3000 chars):', htmlSnippet);
 
-    // Tenta encontrar inputs já presentes (sem esperar mais)
+    // 5. Aguarda inputs da página de login Conta Globo (authx.globoid.globo.com)
+    await page.waitForSelector('input', { timeout: 15000 }).catch(() => {
+      console.log('cartola: sem inputs após 15s');
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const inputsInfo = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (globalThis as any).document;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return Array.from(doc.querySelectorAll('input, button')).map((el: any) => ({
         tag: el.tagName,
         type: el.type,
@@ -157,21 +231,14 @@ async function loginViaPuppeteer(): Promise<string> {
         text: (el.textContent ?? '').trim().slice(0, 40),
       }));
     });
-    console.log('cartola: elementos na página:', JSON.stringify(inputsInfo));
+    console.log('cartola: inputs/botões na página de login:', JSON.stringify(inputsInfo));
 
-    // Se não há inputs ainda, aguarda mais (SPA pode estar renderizando)
-    if (inputsInfo.length === 0) {
-      console.log('cartola: sem inputs ainda, aguardando mais 10s...');
-      await page.waitForSelector('input', { timeout: 10000 }).catch(() => {
-        console.log('cartola: ainda sem inputs após espera extra');
-      });
-    }
-
-    // Tenta seletores em ordem de preferência
-    const emailSel = [
+    // 6. Passo 1 do Conta Globo: preenche e-mail e clica "Continuar"
+    // A página usa fluxo em dois passos: e-mail primeiro, depois senha (SPA — sem reload entre os passos)
+    const emailSels = [
+      'input[type="email"]',
       'input[autocomplete="email"]',
       'input[autocomplete="username"]',
-      'input[type="email"]',
       '#login',
       'input[name="login"]',
       'input[name="email"]',
@@ -180,40 +247,42 @@ async function loginViaPuppeteer(): Promise<string> {
     ];
 
     let emailInput: string | null = null;
-    for (const sel of emailSel) {
+    for (const sel of emailSels) {
       const el = await page.$(sel);
       if (el) { emailInput = sel; break; }
     }
 
-    if (!emailInput) throw new Error('Campo de email não encontrado na página de login do Globo.');
+    if (!emailInput) throw new Error('Campo de email não encontrado na página Conta Globo (authx.globoid.globo.com).');
     console.log('cartola: campo email encontrado com seletor:', emailInput);
 
     await page.click(emailInput);
     await page.type(emailInput, email, { delay: 50 });
 
-    // Submete email (botão ou Enter)
-    const btnContinuar = await page.$('button[type="submit"], #loginButton, input[type="submit"]');
+    // Clica "Continuar" — NÃO aguarda navegação: o SPA troca o formulário sem recarregar
+    const btnContinuar = await page.$('button[type="submit"]');
     if (btnContinuar) {
-      console.log('cartola: clicando botão continuar');
+      console.log('cartola: clicando Continuar');
       await btnContinuar.click();
     } else {
-      console.log('cartola: pressionando Enter para continuar');
+      console.log('cartola: pressionando Enter no campo de email');
       await page.keyboard.press('Enter');
     }
 
-    // Aguarda campo de senha
-    await page.waitForSelector('#password, input[type="password"]', { timeout: 20000 });
+    // 7. Passo 2: aguarda campo de senha aparecer (mesmo domínio, DOM atualizado pelo SPA)
+    console.log('cartola: aguardando campo de senha...');
+    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
     console.log('cartola: campo senha encontrado');
 
-    await page.type('#password, input[type="password"]', senha, { delay: 50 });
+    await page.type('input[type="password"]', senha, { delay: 50 });
 
-    // Submete senha e aguarda navegação
-    console.log('cartola: senha enviada, aguardando redirect...');
+    // Clica "Entrar" e aguarda redirect de volta para o Cartola
+    console.log('cartola: senha enviada, aguardando redirect para cartola.globo.com...');
+    const btnEntrar = await page.$('button[type="submit"]');
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
         console.log('cartola: timeout aguardando redirect');
       }),
-      page.keyboard.press('Enter'),
+      btnEntrar ? btnEntrar.click() : page.keyboard.press('Enter'),
     ]);
 
     const urlFinal = page.url();
