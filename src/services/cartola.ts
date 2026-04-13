@@ -104,6 +104,7 @@ let cookieCache: { cookies: string; expiry: number } | null = null;
 async function loginViaPuppeteer(): Promise<string> {
   // Reusa o cookie por até 30 minutos
   if (cookieCache && Date.now() < cookieCache.expiry) {
+    console.log('cartola: usando cookie em cache');
     return cookieCache.cookies;
   }
 
@@ -124,45 +125,54 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Abre o Cartola — vai redirecionar para login do Globo
-    await page.goto(CARTOLA_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-
-    // Clica em "Entrar" se existir
-    const btnEntrar = await page.$('a[href*="login"], button[data-testid*="login"], a[class*="login"], .header-login');
-    if (btnEntrar) {
-      await btnEntrar.click();
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-    }
+    // Vai direto à página de login do Globo com redirect para o Cartola
+    const loginUrl = 'https://login.globo.com?redirect=https%3A%2F%2Fcartola.globo.com';
+    console.log('cartola: abrindo', loginUrl);
+    await page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('cartola: URL após goto:', page.url());
 
     // Aguarda campo de email
-    const emailSel = 'input[type="email"], input[name="email"], input[id="login"]';
+    const emailSel = '#login, input[type="email"], input[name="email"], input[id="login"]';
     await page.waitForSelector(emailSel, { timeout: 15000 });
-
-    // Verifica se senha já está visível
-    const senhaJaVisivel = await page.$('input[type="password"]');
+    console.log('cartola: campo email encontrado');
 
     await page.click(emailSel);
-    await page.type(emailSel, email, { delay: 60 });
-    console.log('cartola: email preenchido');
+    await page.type(emailSel, email, { delay: 50 });
 
-    if (senhaJaVisivel) {
-      await page.type('input[type="password"]', senha, { delay: 60 });
-      await page.keyboard.press('Enter');
+    // Submete email (botão ou Enter)
+    const btnContinuar = await page.$('button[type="submit"], #loginButton, input[type="submit"]');
+    if (btnContinuar) {
+      console.log('cartola: clicando botão continuar');
+      await btnContinuar.click();
     } else {
-      await page.keyboard.press('Enter');
-      await page.waitForSelector('input[type="password"]', { timeout: 15000 });
-      await page.type('input[type="password"]', senha, { delay: 60 });
+      console.log('cartola: pressionando Enter para continuar');
       await page.keyboard.press('Enter');
     }
 
-    // Aguarda redirecionamento de volta ao Cartola
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
-      .catch(() => new Promise((r) => setTimeout(r, 5000)));
+    // Aguarda campo de senha
+    await page.waitForSelector('#password, input[type="password"]', { timeout: 15000 });
+    console.log('cartola: campo senha encontrado');
 
-    console.log('cartola: login concluído, URL:', page.url());
+    await page.type('#password, input[type="password"]', senha, { delay: 50 });
 
-    // Extrai todos os cookies e formata para o header
+    // Submete senha e aguarda navegação
+    console.log('cartola: senha enviada, aguardando redirect...');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+        console.log('cartola: timeout aguardando redirect');
+      }),
+      page.keyboard.press('Enter'),
+    ]);
+
+    const urlFinal = page.url();
+    console.log('cartola: URL final após login:', urlFinal);
+
+    // Extrai cookies e loga os nomes para diagnóstico
     const cookies = await page.cookies();
+    console.log('cartola: cookies capturados (' + cookies.length + '):', cookies.map((c) => c.name).join(', '));
+
+    if (cookies.length === 0) throw new Error('Login falhou: nenhum cookie capturado.');
+
     const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 
     // Cache por 30 minutos
@@ -247,7 +257,8 @@ export async function consultarPontuacao(): Promise<{
   try {
     const cookies = await loginViaPuppeteer();
 
-    const { data } = await axios.get(`${BASE_URL}/auth/time`, {
+    console.log('cartola: chamando /auth/time...');
+    const { data, status } = await axios.get(`${BASE_URL}/auth/time`, {
       headers: {
         Cookie: cookies,
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
@@ -255,6 +266,7 @@ export async function consultarPontuacao(): Promise<{
         'Referer': 'https://cartola.globo.com/',
       },
     });
+    console.log('cartola: /auth/time status HTTP:', status);
 
     return {
       rodada: data.time?.rodada_atual ?? 0,
@@ -264,6 +276,15 @@ export async function consultarPontuacao(): Promise<{
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Loga o status HTTP e corpo da resposta se for erro de API
+    const axiosErr = err as { response?: { status: number; data: unknown } };
+    if (axiosErr?.response) {
+      console.error(
+        'cartola /auth/time HTTP',
+        axiosErr.response.status,
+        JSON.stringify(axiosErr.response.data).slice(0, 300)
+      );
+    }
     console.error('cartola consultarPontuacao:', message);
     // Limpa cache se falhar para tentar novo login na próxima chamada
     cookieCache = null;
