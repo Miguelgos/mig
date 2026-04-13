@@ -10,6 +10,27 @@ const histories = new Map<string, Content[]>();
 const MAX_TURNS = 20;
 const MAX_TOOL_CALLS = 10; // limite de segurança por iteração
 
+/** Retry com backoff exponencial para erros transitórios do Gemini (503/429). */
+async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+  let delay = 3000;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTransient = msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+      if (isTransient && attempt < maxAttempts) {
+        console.log(`agente: Gemini erro transitório (tentativa ${attempt}/${maxAttempts}), aguardando ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(delay * 2, 30000);
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('geminiRetry: máximo de tentativas excedido');
+}
+
 const SYSTEM_INSTRUCTION = `Você é o Mig, assistente pessoal do Miguel.
 
 Regras:
@@ -38,14 +59,14 @@ export async function runAgentLoop(chatId: string, userMessage: string): Promise
 
   // Loop agêntico: continua enquanto o modelo retornar function calls
   while (toolCallCount < MAX_TOOL_CALLS) {
-    const response = await genai.models.generateContent({
+    const response = await geminiRetry(() => genai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: history,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         tools: [{ functionDeclarations: toolDefinitions }],
       },
-    });
+    }));
 
     const candidate = response.candidates?.[0];
     if (!candidate?.content) {

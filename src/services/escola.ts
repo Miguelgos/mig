@@ -156,12 +156,33 @@ async function launchAndLogin(): Promise<{ browser: Browser; page: Page }> {
   return { browser, page };
 }
 
+/** Retry com backoff exponencial para erros transitórios do Gemini (503/429). */
+async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+  let delay = 3000;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTransient = msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+      if (isTransient && attempt < maxAttempts) {
+        console.log(`escola: Gemini erro transitório (tentativa ${attempt}/${maxAttempts}), aguardando ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(delay * 2, 30000);
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('geminiRetry: máximo de tentativas excedido');
+}
+
 /** Pede ao Gemini para descrever brevemente o estado da página (para debug). */
 async function descreverPagina(imageBase64: string): Promise<string> {
   try {
     const { GoogleGenAI } = await import('@google/genai');
     const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
-    const r = await genai.models.generateContent({
+    const r = await geminiRetry(() => genai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [{
         role: 'user',
@@ -170,7 +191,7 @@ async function descreverPagina(imageBase64: string): Promise<string> {
           { text: 'Descreva em 1 frase o que está sendo exibido nesta tela (ex: formulário de login com campo de email, lista de comunicados, erro, etc).' },
         ],
       }],
-    });
+    }));
     return r.candidates?.[0]?.content?.parts?.[0]?.text ?? 'desconhecido';
   } catch {
     return 'não foi possível descrever';
@@ -219,7 +240,7 @@ async function extrairComImagemGemini(imageBase64: string): Promise<Comunicado[]
   const { GoogleGenAI } = await import('@google/genai');
   const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
 
-  const response = await genai.models.generateContent({
+  const response = await geminiRetry(() => genai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [
       {
@@ -244,7 +265,7 @@ Retorne APENAS o JSON, sem markdown.`,
         ],
       },
     ],
-  });
+  }));
 
   const text = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
   const clean = text.replace(/```json\n?|\n?```/g, '').trim();
