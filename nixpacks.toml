@@ -5,4 +5,4 @@ nixPkgs = ["nodejs_20", "chromium"]
 cmds = ["npm install", "npm run db:generate", "npm run build"]
 
 [start]
-cmd = "npm run db:push && npm start"
+cmd = "npm run db:push && exec node dist/index.js"
