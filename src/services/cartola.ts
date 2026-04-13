@@ -141,16 +141,19 @@ async function loginViaPuppeteer(): Promise<string> {
     // Se já caiu direto na etapa de senha (sessão parcial), pula para ela
     const jaNaSenha = await page.$('input[type="password"]');
     if (!jaNaSenha) {
-      // Encontra o primeiro input visível para o e-mail
-      const emailInput = await page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input:not([type="hidden"])'));
-        const visible = inputs.find((el) => el.offsetParent !== null && el.type !== 'password');
-        if (!visible) return null;
-        // Retorna seletor específico se tiver name/id, senão usa type
-        if (visible.name) return `input[name="${visible.name}"]`;
-        if (visible.id) return `input[id="${visible.id}"]`;
-        return visible.type === 'email' ? 'input[type="email"]' : 'input[type="text"]';
-      });
+      // Tenta seletores em ordem — Globo usa type="text" (não type="email") no campo de e-mail
+      const candidatos = [
+        'input[type="email"]',
+        'input[name="login"]',
+        'input[name="email"]',
+        'input[autocomplete="email"]',
+        'input[autocomplete="username"]',
+        'input[type="text"]',
+      ];
+      let emailInput: string | null = null;
+      for (const sel of candidatos) {
+        if (await page.$(sel)) { emailInput = sel; break; }
+      }
 
       if (!emailInput) throw new Error('Campo de e-mail não encontrado na página de auth.');
       console.log('cartola: campo e-mail detectado:', emailInput);
