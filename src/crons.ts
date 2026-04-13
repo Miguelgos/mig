@@ -3,6 +3,7 @@ import { sendMessage } from './services/telegram';
 import { consultarPontuacao, statusMercado } from './services/cartola';
 import { buscarComunicados, type Comunicado } from './services/escola';
 import { enviarAgenda } from './services/email';
+import { buscarNoticiasIA } from './services/noticias';
 import { GoogleGenAI } from '@google/genai';
 
 /**
@@ -54,6 +55,24 @@ export function scheduleCrons(): void {
       { timezone: 'America/Sao_Paulo' }
     );
   }
+
+  // Todo dia ao meio-dia: resumo de notícias de IA
+  cron.schedule(
+    '0 12 * * *',
+    async () => {
+      console.log('cron: buscando notícias de IA...');
+      try {
+        const { resumo } = await buscarNoticiasIA();
+        const data = new Date().toLocaleDateString('pt-BR');
+        await sendMessage(`🤖 *Notícias de IA — ${data}*\n\n${resumo}`);
+        console.log('cron noticias: resumo enviado.');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('cron noticias:', message);
+      }
+    },
+    { timezone: 'America/Sao_Paulo' }
+  );
 
   console.log('Cron jobs agendados.');
 }

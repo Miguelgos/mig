@@ -51,6 +51,16 @@ export const toolDefinitions: FunctionDeclaration[] = [
     },
   },
   {
+    name: 'noticias_ia',
+    description:
+      'Busca e resume as notícias mais recentes sobre IA: Claude Code, APIs da Anthropic/OpenAI/Gemini, agentes em produção e novidades para desenvolvedores.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'comunicados_escola',
     description:
       'Busca os comunicados mais recentes da escola do Lucas no portal Layers Digital. Retorna título, autor, data e resumo de cada comunicado.',
