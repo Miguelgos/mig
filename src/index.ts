@@ -6,7 +6,7 @@ if (process.env.NODE_ENV !== 'production') {
 import express from 'express';
 import path from 'path';
 import { chatRouter } from './routes/chat';
-import { initTelegram } from './services/telegram';
+import { initTelegram, stopTelegram } from './services/telegram';
 import { scheduleCrons } from './crons';
 
 const app = express();
@@ -21,6 +21,13 @@ app.use('/api/chat', chatRouter);
 // Health check para Railway
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Para o polling do Telegram antes de sair — evita 409 Conflict no redeploy
+process.on('SIGTERM', () => {
+  console.log('SIGTERM recebido, encerrando...');
+  stopTelegram();
+  process.exit(0);
 });
 
 // Impede que rejeições não tratadas derrubem o processo

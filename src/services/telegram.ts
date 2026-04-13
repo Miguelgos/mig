@@ -77,6 +77,15 @@ export function initTelegram(): void {
   console.log('Telegram bot iniciado em modo polling.');
 }
 
+/** Para o polling do bot (chamado no SIGTERM para evitar 409 no redeploy). */
+export function stopTelegram(): void {
+  if (bot) {
+    bot.stopPolling();
+    bot = null;
+    console.log('Telegram bot encerrado.');
+  }
+}
+
 /** Envia uma mensagem proativa para o chat autorizado. */
 export async function sendMessage(text: string): Promise<void> {
   if (!bot || !ALLOWED_CHAT_ID) {

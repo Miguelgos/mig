@@ -125,178 +125,86 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Intercepta navegações para diagnóstico — revela para onde o botão "Entrar" redireciona
-    page.on('request', (req) => {
-      if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
-        console.log('cartola: navegação →', req.url().slice(0, 120));
-      }
-    });
-
-    // 1. Navega ao Cartola (aterrissa em #!/antessala sem redirecionar para login)
-    console.log('cartola: navegando para cartola.globo.com...');
-    await page.goto(CARTOLA_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-    console.log('cartola: URL atual:', page.url());
-
-    // 2. Loga todos os links/botões para diagnóstico
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pageLinks = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doc = (globalThis as any).document;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return Array.from(doc.querySelectorAll('a, button, [role="button"]')).map((el: any) => ({
-        tag: el.tagName,
-        text: (el.textContent ?? '').trim().slice(0, 50),
-        href: el.href ?? '',
-        id: el.id ?? '',
-        cls: (el.className ?? '').toString().slice(0, 60),
-      }));
-    });
-    console.log('cartola: links/botões na página:', JSON.stringify(pageLinks));
-
-    // 3. Tenta obter o href do botão de login para navegar diretamente
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const loginHref = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doc = (globalThis as any).document;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const links = Array.from(doc.querySelectorAll('a')) as any[];
-      const found = links.find((el: any) =>
-        /entrar|login|sign.?in/i.test((el.textContent ?? '') + el.href)
-      );
-      return found?.href ?? null;
-    });
-
-    if (loginHref && !loginHref.includes('cartola.globo.com')) {
-      // Link externo de login encontrado — navega direto
-      console.log('cartola: link de login encontrado:', loginHref.slice(0, 120));
-      await page.goto(loginHref, { waitUntil: 'networkidle2', timeout: 30000 });
-    } else {
-      // Tenta clicar em botão/link pelo texto "Entrar" ou "Login"
-      const loginSelectors = [
-        'a[href*="login"]',
-        'a[href*="entrar"]',
-        'a[href*="signin"]',
-        'button[class*="login"]',
-        'button[class*="entrar"]',
-        '[data-action*="login"]',
-      ];
-
-      let clicked = false;
-      for (const sel of loginSelectors) {
-        const el = await page.$(sel);
-        if (el) {
-          console.log('cartola: clicando login com seletor:', sel);
-          await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-              console.log('cartola: timeout aguardando redirect de login');
-            }),
-            el.click(),
-          ]);
-          clicked = true;
-          break;
-        }
-      }
-
-      if (!clicked) {
-        // Último recurso: login.globo.com sem service ID (endpoint base)
-        console.log('cartola: botão de login não encontrado, tentando login.globo.com...');
-        await page.goto('https://login.globo.com/', { waitUntil: 'networkidle2', timeout: 30000 });
-      }
+    // 1. Navega para o login do Cartola via Conta Globo (authx.globoid.globo.com)
+    // login.globo.com/ faz redirect 302 imediato → ERR_ABORTED esperado, capturamos e continuamos
+    console.log('cartola: navegando para Conta Globo...');
+    try {
+      await page.goto('https://login.globo.com/', { waitUntil: 'networkidle2', timeout: 30000 });
+    } catch {
+      // Redirect imediato causa ERR_ABORTED — aguarda a chain de redirects terminar
+      await new Promise(r => setTimeout(r, 2000));
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
     }
 
-    console.log('cartola: URL após navegar para login:', page.url());
+    console.log('cartola: URL atual:', page.url());
 
-    // 4. Dump HTML da página de login para diagnóstico
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const htmlSnippet = await page.evaluate(() => (globalThis as any).document.documentElement.outerHTML.slice(0, 3000));
-    console.log('cartola: HTML login (primeiros 3000 chars):', htmlSnippet);
+    // 2. Aguarda campo de email aparecer (authx.globoid.globo.com — "Informe o seu e-mail")
+    await page.waitForSelector('input[type="email"], input[type="text"]', { timeout: 15000 });
 
-    // 5. Aguarda inputs da página de login Conta Globo (authx.globoid.globo.com)
-    await page.waitForSelector('input', { timeout: 15000 }).catch(() => {
-      console.log('cartola: sem inputs após 15s');
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inputsInfo = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doc = (globalThis as any).document;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return Array.from(doc.querySelectorAll('input, button')).map((el: any) => ({
-        tag: el.tagName,
-        type: el.type,
-        id: el.id,
-        name: el.name,
-        placeholder: el.placeholder,
-        autocomplete: el.autocomplete,
-        text: (el.textContent ?? '').trim().slice(0, 40),
-      }));
-    });
-    console.log('cartola: inputs/botões na página de login:', JSON.stringify(inputsInfo));
-
-    // 6. Passo 1 do Conta Globo: preenche e-mail e clica "Continuar"
-    // A página usa fluxo em dois passos: e-mail primeiro, depois senha (SPA — sem reload entre os passos)
+    // Seleciona o campo de email — exclui inputs de busca (id="q")
     const emailSels = [
       'input[type="email"]',
       'input[autocomplete="email"]',
       'input[autocomplete="username"]',
-      '#login',
       'input[name="login"]',
       'input[name="email"]',
       'input[name="username"]',
-      'input[type="text"]',
     ];
 
     let emailInput: string | null = null;
     for (const sel of emailSels) {
-      const el = await page.$(sel);
-      if (el) { emailInput = sel; break; }
+      if (await page.$(sel)) { emailInput = sel; break; }
     }
 
-    if (!emailInput) throw new Error('Campo de email não encontrado na página Conta Globo (authx.globoid.globo.com).');
-    console.log('cartola: campo email encontrado com seletor:', emailInput);
+    // Fallback: primeiro input[type="text"] que não seja caixa de busca
+    if (!emailInput) {
+      const textInputs = await page.$$('input[type="text"]');
+      for (const inp of textInputs) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const idVal = await inp.evaluate((el) => (el as any).id);
+        if (idVal !== 'q') { emailInput = `input[type="text"]:not([id="q"])`; break; }
+      }
+    }
+
+    if (!emailInput) throw new Error('Campo de email não encontrado em authx.globoid.globo.com.');
+    console.log('cartola: campo email:', emailInput);
 
     await page.click(emailInput);
     await page.type(emailInput, email, { delay: 50 });
 
-    // Clica "Continuar" — NÃO aguarda navegação: o SPA troca o formulário sem recarregar
+    // 3. Clica "Continuar" — SPA troca o formulário sem recarregar a página
     const btnContinuar = await page.$('button[type="submit"]');
     if (btnContinuar) {
       console.log('cartola: clicando Continuar');
       await btnContinuar.click();
     } else {
-      console.log('cartola: pressionando Enter no campo de email');
       await page.keyboard.press('Enter');
     }
 
-    // 7. Passo 2: aguarda campo de senha aparecer (mesmo domínio, DOM atualizado pelo SPA)
-    console.log('cartola: aguardando campo de senha...');
+    // 4. Aguarda campo de senha aparecer (mesmo domínio, DOM atualizado pelo SPA)
+    console.log('cartola: aguardando campo senha...');
     await page.waitForSelector('input[type="password"]', { timeout: 20000 });
     console.log('cartola: campo senha encontrado');
 
     await page.type('input[type="password"]', senha, { delay: 50 });
 
-    // Clica "Entrar" e aguarda redirect de volta para o Cartola
-    console.log('cartola: senha enviada, aguardando redirect para cartola.globo.com...');
+    // 5. Clica "Entrar" e aguarda redirect de volta para cartola.globo.com
     const btnEntrar = await page.$('button[type="submit"]');
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-        console.log('cartola: timeout aguardando redirect');
+        console.log('cartola: timeout aguardando redirect pós-login');
       }),
       btnEntrar ? btnEntrar.click() : page.keyboard.press('Enter'),
     ]);
 
-    const urlFinal = page.url();
-    console.log('cartola: URL final após login:', urlFinal);
+    console.log('cartola: URL final:', page.url());
 
-    // Extrai cookies e loga os nomes para diagnóstico
     const cookies = await page.cookies();
-    console.log('cartola: cookies capturados (' + cookies.length + '):', cookies.map((c) => c.name).join(', '));
+    console.log('cartola: cookies (' + cookies.length + '):', cookies.map((c) => c.name).join(', '));
 
     if (cookies.length === 0) throw new Error('Login falhou: nenhum cookie capturado.');
 
     const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
-
-    // Cache por 30 minutos
     cookieCache = { cookies: cookieStr, expiry: Date.now() + 30 * 60 * 1000 };
     return cookieStr;
   } finally {
