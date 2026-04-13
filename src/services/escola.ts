@@ -92,46 +92,89 @@ async function launchAndLogin(): Promise<{ browser: Browser; page: Page }> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 900 });
   await page.setUserAgent(
-    'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36'
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   );
 
   try {
     console.log('escola: abrindo página de login...');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 40000 });
+    console.log('escola: URL após carregamento:', page.url());
 
-    // Aguarda campo de email (pode demorar se carregamento é lento)
-    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="email"]';
+    // Screenshot do estado inicial para debug
+    const ss0 = await page.screenshot({ encoding: 'base64' }) as string;
+    const estado0 = await descreverPagina(ss0);
+    console.log('escola: estado inicial:', estado0);
+
+    // Aguarda campo de email
+    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="email"], input[placeholder*="email" i], input[placeholder*="e-mail" i]';
     await page.waitForSelector(emailSelector, { timeout: 15000 });
+
+    // Verifica se senha já está visível na mesma tela (formulário único)
+    const senhaVisivel = await page.$('input[type="password"]');
+
+    await page.click(emailSelector);
     await page.type(emailSelector, EMAIL, { delay: 60 });
+    console.log('escola: email preenchido');
 
-    console.log('escola: email preenchido, clicando em continuar...');
+    if (senhaVisivel) {
+      // Formulário único: preenche tudo e submete
+      console.log('escola: formulário único detectado');
+      await page.type('input[type="password"]', SENHA, { delay: 60 });
+      await page.click('button[type="submit"]');
+    } else {
+      // Formulário em duas etapas: submete email, aguarda campo de senha
+      console.log('escola: formulário em duas etapas, submetendo email...');
+      await page.keyboard.press('Enter');
 
-    // Alguns flows pedem email → botão → senha
-    const btn = await page.$('button[type="submit"]');
-    if (btn) await btn.click();
+      // Aguarda até 15s para senha aparecer
+      const apareceu = await page.waitForSelector('input[type="password"]', { timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
 
-    // Aguarda senha
-    await page.waitForSelector('input[type="password"]', { timeout: 15000 });
-    await page.type('input[type="password"]', SENHA, { delay: 60 });
+      if (!apareceu) {
+        const ss1 = await page.screenshot({ encoding: 'base64' }) as string;
+        const estado1 = await descreverPagina(ss1);
+        console.log('escola: campo de senha não apareceu. Estado da página:', estado1);
+        throw new Error(`Campo de senha não apareceu. Estado: ${estado1}`);
+      }
 
-    console.log('escola: senha preenchida, submetendo...');
-    await page.click('button[type="submit"]');
+      await page.type('input[type="password"]', SENHA, { delay: 60 });
+      await page.keyboard.press('Enter');
+    }
 
-    // Aguarda carregamento do portal
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 40000 }).catch(() => {
-      // Alguns SPAs não disparam navigation — aguarda um tempo fixo
-      return new Promise((r) => setTimeout(r, 5000));
-    });
+    console.log('escola: aguardando redirecionamento pós-login...');
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 40000 })
+      .catch(() => new Promise((r) => setTimeout(r, 6000)));
 
-    console.log('escola: login concluído, URL atual:', page.url());
+    console.log('escola: login concluído. URL:', page.url());
   } catch (err) {
-    // Tira screenshot de debug antes de fechar
     await page.screenshot({ path: '/tmp/escola_erro.png' }).catch(() => {});
     await browser.close();
     throw err;
   }
 
   return { browser, page };
+}
+
+/** Pede ao Gemini para descrever brevemente o estado da página (para debug). */
+async function descreverPagina(imageBase64: string): Promise<string> {
+  try {
+    const { GoogleGenAI } = await import('@google/genai');
+    const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
+    const r = await genai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+          { text: 'Descreva em 1 frase o que está sendo exibido nesta tela (ex: formulário de login com campo de email, lista de comunicados, erro, etc).' },
+        ],
+      }],
+    });
+    return r.candidates?.[0]?.content?.parts?.[0]?.text ?? 'desconhecido';
+  } catch {
+    return 'não foi possível descrever';
+  }
 }
 
 /** Busca os comunicados mais recentes do inbox. */
