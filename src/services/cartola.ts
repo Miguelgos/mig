@@ -125,11 +125,10 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // 1. Navega direto para o endpoint de auth do Cartola (produto=437 define o contexto do serviço)
-    //    Isso redireciona para authx.globoid.globo.com com a tela "conta globo"
-    console.log('cartola: navegando para auth Globo...');
+    // 1. Navega para a antessala do Cartola — dispara redirect para authx.globoid.globo.com
+    console.log('cartola: navegando para antessala...');
     await page.goto(
-      'https://login.globo.com/?produto=437&url=https://cartola.globo.com/',
+      'https://cartola.globo.com/#!/antessala',
       { waitUntil: 'networkidle2', timeout: 30000 }
     );
     console.log('cartola: URL após redirect:', page.url());
