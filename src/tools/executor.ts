@@ -1,4 +1,5 @@
 import { sugerirTime, consultarPontuacao, statusMercado } from '../services/cartola';
+import { buscarComunicados } from '../services/escola';
 
 /**
  * Executa uma tool call retornada pelo Gemini.
@@ -23,6 +24,12 @@ export async function executeTool(
 
       case 'status_mercado_cartola': {
         const resultado = await statusMercado();
+        return JSON.stringify(resultado);
+      }
+
+      case 'comunicados_escola': {
+        const limite = typeof args.limite === 'number' ? args.limite : 5;
+        const resultado = await buscarComunicados(limite);
         return JSON.stringify(resultado);
       }
 

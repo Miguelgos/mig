@@ -40,4 +40,19 @@ export const toolDefinitions: FunctionDeclaration[] = [
       required: [],
     },
   },
+  {
+    name: 'comunicados_escola',
+    description:
+      'Busca os comunicados mais recentes da escola do Lucas no portal Layers Digital. Retorna título, autor, data e resumo de cada comunicado.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limite: {
+          type: Type.NUMBER,
+          description: 'Quantidade máxima de comunicados a retornar (padrão: 5)',
+        },
+      },
+      required: [],
+    },
+  },
 ];
