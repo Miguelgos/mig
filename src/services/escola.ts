@@ -1,4 +1,5 @@
-import puppeteer, { type Browser } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import { execSync } from 'child_process';
 
 const LOGIN_URL =
   'https://id.layers.digital/?context=web&community=morumbisul&location=%2Fportal%2F%40admin%3Alayers-comunicados%2Ffeed%2Finbox';
@@ -13,32 +14,64 @@ export interface Comunicado {
   resumo: string;
 }
 
-/** Retorna o caminho do Chromium disponível no ambiente. */
+/** Localiza o Chromium disponível no ambiente, inclusive no Nix store do Railway. */
 function getChromiumPath(): string {
-  // Railway/Linux (instalado via nixpacks)
+  // 1. Tenta via PATH (Railway nixpacks instala o chromium no PATH)
+  try {
+    const path = execSync('which chromium 2>/dev/null || which chromium-browser 2>/dev/null || which google-chrome 2>/dev/null', {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim().split('\n')[0];
+    if (path) {
+      console.log('escola: Chromium encontrado via PATH:', path);
+      return path;
+    }
+  } catch {
+    // continua
+  }
+
+  // 2. Tenta encontrar no Nix store (formato /nix/store/HASH-chromium-VERSION/bin/chromium)
+  try {
+    const nixPath = execSync(
+      'find /nix/store -maxdepth 3 -name "chromium" -path "*/bin/chromium" 2>/dev/null | head -1',
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    if (nixPath) {
+      console.log('escola: Chromium encontrado no Nix store:', nixPath);
+      return nixPath;
+    }
+  } catch {
+    // continua
+  }
+
+  // 3. Candidatos fixos
   const candidates = [
     '/run/current-system/sw/bin/chromium',
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
     '/nix/var/nix/profiles/default/bin/chromium',
   ];
 
-  for (const path of candidates) {
+  const fs = require('fs') as typeof import('fs');
+  for (const p of candidates) {
     try {
-      require('fs').accessSync(path);
-      return path;
+      fs.accessSync(p);
+      console.log('escola: Chromium encontrado em', p);
+      return p;
     } catch {
       continue;
     }
   }
 
-  // Desenvolvimento local no WSL — tenta o Chrome do Windows
-  return '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe';
+  throw new Error(
+    'Chromium não encontrado. Instale o Chrome/Chromium ou configure o nixpacks.toml.'
+  );
 }
 
-/** Lança um browser headless e faz login na plataforma Layers. */
-async function launchAndLogin(): Promise<Browser> {
+/** Lança browser headless e faz login na plataforma Layers. */
+async function launchAndLogin(): Promise<{ browser: Browser; page: Page }> {
   const executablePath = getChromiumPath();
 
   const browser = await puppeteer.launch({
@@ -49,68 +82,84 @@ async function launchAndLogin(): Promise<Browser> {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--window-size=1280,800',
+      '--no-zygote',
+      '--single-process',
+      '--disable-extensions',
+      '--window-size=1280,900',
     ],
   });
 
   const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 800 });
+  await page.setViewport({ width: 1280, height: 900 });
+  await page.setUserAgent(
+    'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36'
+  );
 
   try {
-    await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('escola: abrindo página de login...');
+    await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 40000 });
 
-    // Preenche email
-    await page.waitForSelector('input[type="email"], input[name="email"], input[placeholder*="email" i]', { timeout: 10000 });
-    await page.type('input[type="email"], input[name="email"], input[placeholder*="email" i]', EMAIL, { delay: 50 });
+    // Aguarda campo de email (pode demorar se carregamento é lento)
+    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="email"]';
+    await page.waitForSelector(emailSelector, { timeout: 15000 });
+    await page.type(emailSelector, EMAIL, { delay: 60 });
 
-    // Clica em continuar / próximo (alguns fluxos têm duas etapas)
-    const btnContinue = await page.$('button[type="submit"], button:not([disabled])');
-    if (btnContinue) await btnContinue.click();
+    console.log('escola: email preenchido, clicando em continuar...');
 
-    // Aguarda campo de senha aparecer
-    await page.waitForSelector('input[type="password"]', { timeout: 10000 });
-    await page.type('input[type="password"]', SENHA, { delay: 50 });
+    // Alguns flows pedem email → botão → senha
+    const btn = await page.$('button[type="submit"]');
+    if (btn) await btn.click();
 
-    // Submete login
+    // Aguarda senha
+    await page.waitForSelector('input[type="password"]', { timeout: 15000 });
+    await page.type('input[type="password"]', SENHA, { delay: 60 });
+
+    console.log('escola: senha preenchida, submetendo...');
     await page.click('button[type="submit"]');
 
-    // Aguarda navegação para o portal
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    // Aguarda carregamento do portal
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 40000 }).catch(() => {
+      // Alguns SPAs não disparam navigation — aguarda um tempo fixo
+      return new Promise((r) => setTimeout(r, 5000));
+    });
 
-    console.log('escola: login realizado com sucesso');
+    console.log('escola: login concluído, URL atual:', page.url());
   } catch (err) {
+    // Tira screenshot de debug antes de fechar
+    await page.screenshot({ path: '/tmp/escola_erro.png' }).catch(() => {});
     await browser.close();
     throw err;
   }
 
-  return browser;
+  return { browser, page };
 }
 
 /** Busca os comunicados mais recentes do inbox. */
 export async function buscarComunicados(limite = 5): Promise<Comunicado[]> {
   if (!EMAIL || !SENHA) {
-    throw new Error('ESCOLA_EMAIL e ESCOLA_SENHA não configurados.');
+    throw new Error('ESCOLA_EMAIL e ESCOLA_SENHA não configurados nas variáveis de ambiente.');
   }
 
   let browser: Browser | null = null;
 
   try {
-    browser = await launchAndLogin();
-    const pages = await browser.pages();
-    const page = pages[pages.length - 1];
+    const result = await launchAndLogin();
+    browser = result.browser;
+    const page = result.page;
 
-    // Aguarda a lista de comunicados carregar
-    await page.waitForSelector(
-      '[class*="comunicado"], [class*="message"], [class*="feed"], article, [class*="card"]',
-      { timeout: 20000 }
-    );
+    // Aguarda qualquer conteúdo da lista de comunicados
+    console.log('escola: aguardando lista de comunicados...');
+    await Promise.race([
+      page.waitForSelector('[class*="feed"], [class*="inbox"], [class*="message"], article, [class*="card"], [class*="item"]', { timeout: 20000 }),
+      new Promise((r) => setTimeout(r, 12000)), // fallback após 12s
+    ]);
 
-    // Tira screenshot para debug (salva localmente)
-    await page.screenshot({ path: '/tmp/escola_debug.png', fullPage: false });
+    // Screenshot da página para Gemini Vision extrair o conteúdo
+    console.log('escola: capturando screenshot...');
+    const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
 
-    // Usa Gemini Vision para extrair os comunicados da tela
-    const screenshot = await page.screenshot({ encoding: 'base64' });
     const comunicados = await extrairComImagemGemini(screenshot as string);
+    console.log(`escola: ${comunicados.length} comunicado(s) extraído(s)`);
 
     return comunicados.slice(0, limite);
   } catch (err) {
@@ -134,22 +183,20 @@ async function extrairComImagemGemini(imageBase64: string): Promise<Comunicado[]
         role: 'user',
         parts: [
           {
-            inlineData: {
-              mimeType: 'image/png',
-              data: imageBase64,
-            },
+            inlineData: { mimeType: 'image/png', data: imageBase64 },
           },
           {
-            text: `Esta é uma tela de comunicados escolares. Extraia todos os comunicados visíveis e retorne um JSON válido no formato:
+            text: `Esta é uma tela de comunicados escolares. Extraia todos os comunicados ou avisos visíveis e retorne um JSON válido:
 [
   {
     "titulo": "Título do comunicado",
-    "autor": "Nome do autor ou escola",
-    "data": "Data se visível, ou vazio",
-    "resumo": "Resumo do conteúdo"
+    "autor": "Autor ou escola",
+    "data": "Data se visível, senão vazio",
+    "resumo": "Resumo do conteúdo visível"
   }
 ]
-Retorne APENAS o JSON, sem markdown, sem explicação.`,
+Se a tela mostrar login ou erro, retorne [].
+Retorne APENAS o JSON, sem markdown.`,
           },
         ],
       },
@@ -157,12 +204,13 @@ Retorne APENAS o JSON, sem markdown, sem explicação.`,
   });
 
   const text = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+  const clean = text.replace(/```json\n?|\n?```/g, '').trim();
 
   try {
-    const parsed = JSON.parse(text.trim());
+    const parsed = JSON.parse(clean);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
-    console.error('escola: falha ao parsear JSON do Gemini:', text.slice(0, 200));
+    console.error('escola: falha ao parsear JSON do Gemini:', clean.slice(0, 300));
     return [];
   }
 }
