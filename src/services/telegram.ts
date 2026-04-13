@@ -20,7 +20,7 @@ export function initTelegram(): void {
     console.warn('TELEGRAM_ALLOWED_CHAT_ID não configurado — rodando em modo descoberta.');
   }
 
-  bot = new TelegramBot(token, { polling: true });
+  bot = new TelegramBot(token, { polling: false });
 
   bot.on('message', async (msg) => {
     const chatId = String(msg.chat.id);
@@ -74,7 +74,13 @@ export function initTelegram(): void {
     console.error('telegram polling error:', err.message);
   });
 
-  console.log('Telegram bot iniciado em modo polling.');
+  // Aguarda 3s antes de iniciar polling — dá tempo da instância anterior encerrar
+  // e evita 409 Conflict durante rolling deploy no Railway
+  console.log('Telegram bot aguardando 3s antes de iniciar polling...');
+  setTimeout(() => {
+    bot?.startPolling();
+    console.log('Telegram bot iniciado em modo polling.');
+  }, 3000);
 }
 
 /** Para o polling do bot (chamado no SIGTERM para evitar 409 no redeploy). */

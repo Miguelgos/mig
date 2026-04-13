@@ -137,17 +137,14 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.click('input[name="email"]');
     await page.type('input[name="email"]', email, { delay: 60 });
 
-    // Clica "Continuar" e aguarda URL mudar para /login/password
+    // Clica "Continuar" — a transição e-mail→senha é SPA (sem reload completo)
     console.log('cartola: clicando Continuar...');
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
-      page.click('button[type="submit"]'),
-    ]);
-    console.log('cartola: URL após Continuar:', page.url());
+    await page.click('button[type="submit"]');
 
-    // 3. Etapa de senha — input[name="password"]
+    // 3. Etapa de senha — aguarda o campo de senha aparecer
     console.log('cartola: aguardando campo de senha...');
     await page.waitForSelector('input[name="password"]', { timeout: 20000 });
+    console.log('cartola: URL na tela de senha:', page.url());
 
     await page.type('input[name="password"]', senha, { delay: 60 });
 
