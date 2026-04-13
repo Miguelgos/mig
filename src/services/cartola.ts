@@ -137,11 +137,13 @@ async function loginViaPuppeteer(): Promise<string> {
       console.log('cartola: URL após goto login direto:', page.url());
     }
 
-    // Aguarda QUALQUER input aparecer (a SPA do Globo pode demorar para renderizar)
-    await page.waitForSelector('input', { timeout: 20000 });
-    console.log('cartola: URL quando inputs apareceram:', page.url());
+    // Dump HTML para diagnóstico — ajuda a entender o que o Globo renderiza
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const htmlSnippet = await page.evaluate(() => (globalThis as any).document.documentElement.outerHTML.slice(0, 3000));
+    console.log('cartola: HTML (primeiros 3000 chars):', htmlSnippet);
 
-    // Debug: loga todos os inputs para diagnóstico (roda no contexto do browser)
+    // Tenta encontrar inputs já presentes (sem esperar mais)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const inputsInfo = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (globalThis as any).document;
@@ -157,13 +159,12 @@ async function loginViaPuppeteer(): Promise<string> {
     });
     console.log('cartola: elementos na página:', JSON.stringify(inputsInfo));
 
-    // Se a página for a de busca do Globo (input id="q"), o redirect não funcionou
-    const isSearchPage = inputsInfo.some((el: { id: string }) => el.id === 'q');
-    if (isSearchPage) {
-      console.log('cartola: detectada página de busca, tentando URL de login /login/43 diretamente...');
-      await page.goto('https://login.globo.com/login/43', { waitUntil: 'networkidle2', timeout: 30000 });
-      console.log('cartola: URL após fallback para /login/43:', page.url());
-      await page.waitForSelector('input', { timeout: 20000 });
+    // Se não há inputs ainda, aguarda mais (SPA pode estar renderizando)
+    if (inputsInfo.length === 0) {
+      console.log('cartola: sem inputs ainda, aguardando mais 10s...');
+      await page.waitForSelector('input', { timeout: 10000 }).catch(() => {
+        console.log('cartola: ainda sem inputs após espera extra');
+      });
     }
 
     // Tenta seletores em ordem de preferência
