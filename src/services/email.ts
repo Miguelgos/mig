@@ -14,7 +14,7 @@ function criarTransporte() {
     port: 587,
     secure: false,
     auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-    tls: { ciphers: 'SSLv3' },
+    tls: { rejectUnauthorized: false },
   });
 }
 
