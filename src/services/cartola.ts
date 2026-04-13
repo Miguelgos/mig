@@ -137,56 +137,44 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.click('input[name="email"]');
     await page.type('input[name="email"]', email, { delay: 60 });
 
-    // Clica "Continuar" — busca pelo texto para não acertar outro submit button da página
-    console.log('cartola: clicando Continuar...');
-    const submitButtons = await page.$$('button[type="submit"]');
-    let continuarClicked = false;
-    for (const btn of submitButtons) {
-      const text = await btn.evaluate((el) => el.textContent ?? '');
-      if (text.includes('Continuar')) {
-        await btn.click();
-        continuarClicked = true;
-        break;
-      }
-    }
-    if (!continuarClicked) throw new Error('Botão Continuar não encontrado na página.');
+    // Submete com Enter — mais confiável em React forms do que clicar o botão
+    console.log('cartola: submetendo e-mail com Enter...');
+    await page.keyboard.press('Enter');
 
-    // 3. Etapa de senha — aguarda o campo aparecer (type="password" é mais robusto que name)
-    console.log('cartola: aguardando campo de senha...');
-    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
+    // 3. Aguarda campo de senha — cobre dois casos:
+    //    a) SPA: campo aparece inline na mesma URL
+    //    b) Redirect: página navega para authx.globoid.globo.com/login/password
+    console.log('cartola: aguardando transição para tela de senha...');
+    await Promise.race([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
+        console.log('cartola: sem redirecionamento após Enter (SPA)');
+      }),
+      page.waitForSelector('input[type="password"]', { timeout: 15000 }).catch(() => {}),
+    ]);
+    console.log('cartola: URL após e-mail:', page.url());
+
+    // Loga inputs presentes para debug caso senha não apareça
+    const allInputs = await page.$$('input');
+    const inputInfos: string[] = [];
+    for (const inp of allInputs) {
+      const info = await inp.evaluate((el) => `type=${el.type} name=${el.name}`);
+      inputInfos.push(info);
+    }
+    console.log('cartola: inputs presentes:', inputInfos.join(' | ') || '(nenhum)');
+
+    await page.waitForSelector('input[type="password"]', { timeout: 15000 });
     console.log('cartola: URL na tela de senha:', page.url());
 
     await page.type('input[type="password"]', senha, { delay: 60 });
 
-    // Clica "Entrar" — busca pelo texto igual ao Continuar
-    console.log('cartola: clicando Entrar...');
-    const submitButtons2 = await page.$$('button[type="submit"]');
-    let entrarClicked = false;
-    for (const btn of submitButtons2) {
-      const text = await btn.evaluate((el) => el.textContent ?? '');
-      if (text.includes('Entrar')) {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-            console.log('cartola: timeout aguardando redirect pós-login');
-          }),
-          btn.click(),
-        ]);
-        entrarClicked = true;
-        break;
-      }
-    }
-    if (!entrarClicked) {
-      // Fallback: clica no primeiro submit disponível
-      const fallback = await page.$('button[type="submit"]');
-      if (fallback) {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-            console.log('cartola: timeout aguardando redirect pós-login (fallback)');
-          }),
-          fallback.click(),
-        ]);
-      }
-    }
+    // Submete senha com Enter — mesma razão: mais confiável em React forms
+    console.log('cartola: submetendo senha com Enter...');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+        console.log('cartola: timeout aguardando redirect pós-login');
+      }),
+      page.keyboard.press('Enter'),
+    ]);
 
     console.log('cartola: URL final:', page.url());
 
