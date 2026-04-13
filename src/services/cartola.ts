@@ -125,14 +125,21 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Vai direto à página de login do Globo com redirect para o Cartola
-    const loginUrl = 'https://login.globo.com?redirect=https%3A%2F%2Fcartola.globo.com';
-    console.log('cartola: abrindo', loginUrl);
-    await page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-    console.log('cartola: URL após goto:', page.url());
+    // Navega ao Cartola e segue o redirect natural para o Globo ID
+    console.log('cartola: abrindo cartola.globo.com para seguir redirect de login...');
+    await page.goto(CARTOLA_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('cartola: URL após goto cartola:', page.url());
+
+    // Se ainda estiver no cartola (usuário já logado ou sem redirect), força login
+    if (page.url().includes('cartola.globo.com') && !page.url().includes('login')) {
+      console.log('cartola: não redirecionou para login, tentando URL direta...');
+      await page.goto('https://login.globo.com/login/43', { waitUntil: 'networkidle2', timeout: 30000 });
+      console.log('cartola: URL após goto login direto:', page.url());
+    }
 
     // Aguarda QUALQUER input aparecer (a SPA do Globo pode demorar para renderizar)
     await page.waitForSelector('input', { timeout: 20000 });
+    console.log('cartola: URL quando inputs apareceram:', page.url());
 
     // Debug: loga todos os inputs para diagnóstico (roda no contexto do browser)
     const inputsInfo = await page.evaluate(() => {
@@ -149,6 +156,15 @@ async function loginViaPuppeteer(): Promise<string> {
       }));
     });
     console.log('cartola: elementos na página:', JSON.stringify(inputsInfo));
+
+    // Se a página for a de busca do Globo (input id="q"), o redirect não funcionou
+    const isSearchPage = inputsInfo.some((el: { id: string }) => el.id === 'q');
+    if (isSearchPage) {
+      console.log('cartola: detectada página de busca, tentando URL de login /login/43 diretamente...');
+      await page.goto('https://login.globo.com/login/43', { waitUntil: 'networkidle2', timeout: 30000 });
+      console.log('cartola: URL após fallback para /login/43:', page.url());
+      await page.waitForSelector('input', { timeout: 20000 });
+    }
 
     // Tenta seletores em ordem de preferência
     const emailSel = [
