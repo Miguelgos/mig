@@ -125,61 +125,34 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // 1. Navega para a antessala do Cartola — dispara redirect para authx.globoid.globo.com
-    console.log('cartola: navegando para antessala...');
-    await page.goto(
-      'https://cartola.globo.com/#!/antessala',
-      { waitUntil: 'networkidle2', timeout: 30000 }
-    );
+    // 1. Navega para o Cartola — redireciona automaticamente para authx.globoid.globo.com
+    console.log('cartola: navegando para cartola.globo.com...');
+    await page.goto('https://cartola.globo.com', { waitUntil: 'networkidle2', timeout: 30000 });
     console.log('cartola: URL após redirect:', page.url());
 
-    // 2. Etapa de e-mail: campo type="text" com placeholder "Ao digitar @outlook, @yahoo, etc..."
-    //    Aguarda qualquer input visível (a tela usa type="text", não type="email")
+    // 2. Etapa de e-mail — input[name="email"] com type="email"
     console.log('cartola: aguardando campo de e-mail...');
-    await page.waitForSelector('input:not([type="hidden"])', { timeout: 20000 });
+    await page.waitForSelector('input[name="email"]', { timeout: 20000 });
 
-    // Se já caiu direto na etapa de senha (sessão parcial), pula para ela
-    const jaNaSenha = await page.$('input[type="password"]');
-    if (!jaNaSenha) {
-      // Tenta seletores em ordem — Globo usa type="text" (não type="email") no campo de e-mail
-      const candidatos = [
-        'input[type="email"]',
-        'input[name="login"]',
-        'input[name="email"]',
-        'input[autocomplete="email"]',
-        'input[autocomplete="username"]',
-        'input[type="text"]',
-      ];
-      let emailInput: string | null = null;
-      for (const sel of candidatos) {
-        if (await page.$(sel)) { emailInput = sel; break; }
-      }
+    await page.click('input[name="email"]');
+    await page.type('input[name="email"]', email, { delay: 60 });
 
-      if (!emailInput) throw new Error('Campo de e-mail não encontrado na página de auth.');
-      console.log('cartola: campo e-mail detectado:', emailInput);
+    // Clica "Continuar" e aguarda URL mudar para /login/password
+    console.log('cartola: clicando Continuar...');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
+      page.click('button[type="submit"]'),
+    ]);
+    console.log('cartola: URL após Continuar:', page.url());
 
-      await page.click(emailInput);
-      await page.type(emailInput, email, { delay: 60 });
+    // 3. Etapa de senha — input[name="password"]
+    console.log('cartola: aguardando campo de senha...');
+    await page.waitForSelector('input[name="password"]', { timeout: 20000 });
 
-      // Clica "Continuar"
-      const btnContinuar = await page.$('button[type="submit"]');
-      if (btnContinuar) {
-        console.log('cartola: clicando Continuar');
-        await btnContinuar.click();
-      } else {
-        await page.keyboard.press('Enter');
-      }
-
-      // Aguarda campo de senha aparecer (SPA — sem reload de página completo)
-      console.log('cartola: aguardando tela de senha...');
-      await page.waitForSelector('input[type="password"]', { timeout: 20000 });
-    }
-
-    // 3. Etapa de senha
-    console.log('cartola: preenchendo senha...');
-    await page.type('input[type="password"]', senha, { delay: 60 });
+    await page.type('input[name="password"]', senha, { delay: 60 });
 
     // Clica "Entrar" e aguarda redirect de volta para cartola.globo.com
+    console.log('cartola: clicando Entrar...');
     const btnEntrar = await page.$('button[type="submit"]');
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {

@@ -18,27 +18,35 @@ A API não exige autenticação para dados públicos (atletas, mercado); autenti
 
 | Endpoint | Método | Descrição |
 |----------|--------|-----------|
-| `https://login.globo.com/api/authentication` | POST | Login — retorna GLBID cookie |
-| `https://api.cartola.globo.com/auth/time` | GET | Time do usuário (requer cookie GLBID) |
+| `https://api.cartola.globo.com/auth/time` | GET | Time do usuário (requer cookie de sessão Globo) |
 
 ## Autenticação
 
+O login direto via `POST https://login.globo.com/api/authentication` não funciona de forma confiável (proteções anti-bot). O fluxo atual usa **Puppeteer** para simular o login no browser:
+
+### Fluxo via Puppeteer
+
+1. Abre `https://cartola.globo.com` em modo headless
+2. Clica no botão "Entrar" da página
+3. Se o botão não for encontrado, navega diretamente para `https://cartola.globo.com?produto=437` (fallback)
+4. Preenche e-mail e senha no formulário de login da Globo
+5. Aguarda redirecionamento de volta ao Cartola
+6. Extrai os cookies de sessão do browser
+7. Usa os cookies extraídos nas chamadas subsequentes à API (`/auth/time`)
+
+### Cache de cookies
+
+Os cookies de sessão ficam em cache por **30 minutos** em memória. Novas consultas dentro desse período reutilizam os cookies sem novo login, evitando sobrecarga no Puppeteer.
+
 ```
-POST https://login.globo.com/api/authentication
-Content-Type: application/json
-
-{
-  "payload": {
-    "email": "usuario@email.com",
-    "password": "senha123",
-    "serviceId": 4728
-  }
-}
+cookie cache (memória)
+  └── expira após 30min → novo login via Puppeteer
 ```
 
-Resposta: `{ "glbid": "TOKEN_AQUI", ... }`
+### Variáveis necessárias
 
-O token é passado como cookie nas requisições autenticadas: `Cookie: GLBID=TOKEN_AQUI`
+- `CARTOLA_EMAIL` — e-mail da conta Globo
+- `CARTOLA_SENHA` — senha da conta Globo
 
 ## Exemplos de request/response
 
@@ -110,9 +118,9 @@ O token é passado como cookie nas requisições autenticadas: `Cookie: GLBID=TO
 ## Limitações conhecidas
 
 - A API não é oficial e pode mudar sem aviso
-- O endpoint de login pode ter rate limiting
-- GLBID expira — não há refresh automático implementado (faz login a cada consulta)
-- Não há cache implementado — cada chamada vai à API do Cartola
+- Login via Puppeteer é lento (~10-20s) e frágil a mudanças no DOM do site
+- Cookie cache de 30min em memória: reiniciar o processo invalida o cache e força novo login
+- Puppeteer requer Chromium instalado — configurado via `nixpacks.toml` no Railway
 
 ## Próximas melhorias
 
