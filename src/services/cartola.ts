@@ -131,13 +131,48 @@ async function loginViaPuppeteer(): Promise<string> {
     await page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     console.log('cartola: URL após goto:', page.url());
 
-    // Aguarda campo de email
-    const emailSel = '#login, input[type="email"], input[name="email"], input[id="login"]';
-    await page.waitForSelector(emailSel, { timeout: 15000 });
-    console.log('cartola: campo email encontrado');
+    // Aguarda QUALQUER input aparecer (a SPA do Globo pode demorar para renderizar)
+    await page.waitForSelector('input', { timeout: 20000 });
 
-    await page.click(emailSel);
-    await page.type(emailSel, email, { delay: 50 });
+    // Debug: loga todos os inputs para diagnóstico (roda no contexto do browser)
+    const inputsInfo = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (globalThis as any).document;
+      return Array.from(doc.querySelectorAll('input, button')).map((el: any) => ({
+        tag: el.tagName,
+        type: el.type,
+        id: el.id,
+        name: el.name,
+        placeholder: el.placeholder,
+        autocomplete: el.autocomplete,
+        text: (el.textContent ?? '').trim().slice(0, 40),
+      }));
+    });
+    console.log('cartola: elementos na página:', JSON.stringify(inputsInfo));
+
+    // Tenta seletores em ordem de preferência
+    const emailSel = [
+      'input[autocomplete="email"]',
+      'input[autocomplete="username"]',
+      'input[type="email"]',
+      '#login',
+      'input[name="login"]',
+      'input[name="email"]',
+      'input[name="username"]',
+      'input[type="text"]',
+    ];
+
+    let emailInput: string | null = null;
+    for (const sel of emailSel) {
+      const el = await page.$(sel);
+      if (el) { emailInput = sel; break; }
+    }
+
+    if (!emailInput) throw new Error('Campo de email não encontrado na página de login do Globo.');
+    console.log('cartola: campo email encontrado com seletor:', emailInput);
+
+    await page.click(emailInput);
+    await page.type(emailInput, email, { delay: 50 });
 
     // Submete email (botão ou Enter)
     const btnContinuar = await page.$('button[type="submit"], #loginButton, input[type="submit"]');
@@ -150,7 +185,7 @@ async function loginViaPuppeteer(): Promise<string> {
     }
 
     // Aguarda campo de senha
-    await page.waitForSelector('#password, input[type="password"]', { timeout: 15000 });
+    await page.waitForSelector('#password, input[type="password"]', { timeout: 20000 });
     console.log('cartola: campo senha encontrado');
 
     await page.type('#password, input[type="password"]', senha, { delay: 50 });
