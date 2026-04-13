@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { sendMessage } from './services/telegram';
 import { consultarPontuacao, statusMercado } from './services/cartola';
 import { buscarComunicados, type Comunicado } from './services/escola';
+import { enviarAgenda } from './services/email';
 import { GoogleGenAI } from '@google/genai';
 
 /**
@@ -74,7 +75,7 @@ async function verificarComunicadosEscola(): Promise<void> {
       return;
     }
 
-    // Monta e envia a notificação
+    // Monta e envia a notificação no Telegram
     let msg = `🏫 *Comunicados da escola do Lucas*\n\n`;
     for (const c of importantes) {
       msg += `📌 *${c.titulo}*\n`;
@@ -86,6 +87,18 @@ async function verificarComunicadosEscola(): Promise<void> {
 
     await sendMessage(msg.trim());
     console.log(`cron escola: ${importantes.length} comunicado(s) importante(s) enviado(s).`);
+
+    // Envia agenda por e-mail para comunicados com data
+    const comData = importantes.filter((c) => c.data);
+    if (comData.length > 0) {
+      const enviados = await enviarAgenda(comData).catch((err) => {
+        console.error('cron escola email:', err instanceof Error ? err.message : err);
+        return 0;
+      });
+      if (enviados > 0) {
+        await sendMessage(`📅 Agenda com ${enviados} evento${enviados > 1 ? 's' : ''} enviada para miguelgos@live.com`);
+      }
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('cron escola:', message);
