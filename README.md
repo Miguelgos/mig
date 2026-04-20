@@ -25,6 +25,7 @@ Variáveis opcionais por integração:
 |------------|-----------|
 | Cartola FC (autenticado) | `CARTOLA_EMAIL`, `CARTOLA_SENHA` |
 | Portal escolar | `ESCOLA_EMAIL`, `ESCOLA_SENHA` |
+| Lanchonete (Eat Simple) | `ESCOLA_EMAIL`, `ESCOLA_SENHA` (mesmas da escola) |
 | Envio de e-mail | `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_DESTINO` |
 
 ### 3. Criar o banco de dados
@@ -58,6 +59,13 @@ Acesse `http://localhost:3000` para o chat web.
 - Cron automático às 7h, 13h e 18h: filtra comunicados importantes com Gemini, envia no Telegram com detalhes e envia e-mail com `.ics` quando houver data
 - Deduplicação persistente: cada comunicado enviado fica salvo em `SentEscola` (SQLite) pelo fingerprint `titulo|autor|data` e não é reenviado
 - Requer `ESCOLA_EMAIL` e `ESCOLA_SENHA`
+
+### Lanchonete da escola (Eat Simple)
+
+- Login via Puppeteer em `eatsimple.com.br` com as mesmas credenciais do portal escolar
+- Screenshot da home → Gemini Vision extrai nome do aluno e saldo
+- Cron automático de segunda a sexta às 6:30: envia o saldo pelo Telegram
+- Tool `saldo_lanchonete` para consulta manual pelo chat
 
 ### E-mail com agenda
 

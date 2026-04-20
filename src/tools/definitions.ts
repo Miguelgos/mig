@@ -75,4 +75,14 @@ export const toolDefinitions: FunctionDeclaration[] = [
       required: [],
     },
   },
+  {
+    name: 'saldo_lanchonete',
+    description:
+      'Consulta o saldo atual da lanchonete do Lucas no portal Eat Simple (eatsimple.com.br). Retorna o nome do aluno e o saldo em reais.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+      required: [],
+    },
+  },
 ];

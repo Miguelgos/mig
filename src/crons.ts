@@ -4,6 +4,7 @@ import { sendMessage } from './services/telegram';
 import { consultarPontuacao, statusMercado } from './services/cartola';
 import { buscarComunicados, type Comunicado } from './services/escola';
 import { enviarAgenda } from './services/email';
+import { consultarSaldo } from './services/eatsimple';
 import { buscarNoticiasIA } from './services/noticias';
 import { GoogleGenAI } from '@google/genai';
 import { prisma } from './db';
@@ -63,6 +64,26 @@ export function scheduleCrons(): void {
       { timezone: 'America/Sao_Paulo' }
     );
   }
+
+  // Seg a sex às 6:30: saldo da lanchonete do Lucas (Eat Simple)
+  cron.schedule(
+    '30 6 * * 1-5',
+    async () => {
+      console.log('cron: consultando saldo da lanchonete...');
+      try {
+        const s = await consultarSaldo();
+        await sendMessage(
+          `🍔 *Lanchonete da escola — ${s.aluno}*\n\n` +
+            `💰 Saldo: *${s.saldo}*\n` +
+            `🕕 Consultado em ${s.atualizadoEm}`
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('cron lanchonete:', message);
+      }
+    },
+    { timezone: 'America/Sao_Paulo' }
+  );
 
   // Todo dia ao meio-dia: resumo de notícias de IA
   cron.schedule(

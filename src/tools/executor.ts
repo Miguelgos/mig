@@ -1,5 +1,6 @@
 import { sugerirTime, consultarPontuacao, statusMercado } from '../services/cartola';
 import { buscarComunicados } from '../services/escola';
+import { consultarSaldo } from '../services/eatsimple';
 import { enviarAgenda } from '../services/email';
 import { buscarNoticiasIA } from '../services/noticias';
 
@@ -53,6 +54,11 @@ export async function executeTool(
       case 'comunicados_escola': {
         const limite = typeof args.limite === 'number' ? args.limite : 5;
         const resultado = await buscarComunicados(limite);
+        return JSON.stringify(resultado);
+      }
+
+      case 'saldo_lanchonete': {
+        const resultado = await consultarSaldo();
         return JSON.stringify(resultado);
       }
 

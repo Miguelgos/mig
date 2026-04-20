@@ -16,7 +16,7 @@ export interface Comunicado {
 }
 
 /** Localiza o Chromium disponível no ambiente, inclusive no Nix store do Railway. */
-function getChromiumPath(): string {
+export function getChromiumPath(): string {
   // 1. Tenta via PATH (Railway nixpacks instala o chromium no PATH)
   try {
     const path = execSync('which chromium 2>/dev/null || which chromium-browser 2>/dev/null || which google-chrome 2>/dev/null', {
@@ -158,7 +158,7 @@ async function launchAndLogin(): Promise<{ browser: Browser; page: Page }> {
 }
 
 /** Retry com backoff exponencial para erros transitórios do Gemini (503/429). */
-async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+export async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
   let delay = 3000;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
