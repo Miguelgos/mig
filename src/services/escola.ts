@@ -1,4 +1,4 @@
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page, type ElementHandle } from 'puppeteer-core';
 import { execSync } from 'child_process';
 
 const LOGIN_URL =
@@ -257,37 +257,61 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
   const tituloNormalizado = titulo.trim();
   if (!tituloNormalizado) return '';
 
-  // Busca e clica no elemento visível que contém o título
-  const clicado = await page.evaluate((alvo: string) => {
+  // Localiza o menor elemento visível cujo texto normalizado contém o título.
+  // Normalização remove acentos e colapsa espaços (OCR do Gemini diverge do DOM).
+  const handle = await page.evaluateHandle((alvo: string) => {
+    const normalize = (s: string) =>
+      s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    const alvoNorm = normalize(alvo);
+    const trecho = alvoNorm.slice(0, Math.min(25, alvoNorm.length));
+    if (trecho.length < 6) return null;
+
     const g = globalThis as unknown as {
       document: { querySelectorAll: (s: string) => ArrayLike<unknown> };
     };
-    const trecho = alvo.slice(0, Math.min(40, alvo.length)).toLowerCase();
-    const candidatos = Array.from(g.document.querySelectorAll('button, a, [role="button"], li, article, div')) as unknown[];
-    for (const raw of candidatos) {
+    const todos = Array.from(g.document.querySelectorAll('*')) as unknown[];
+
+    let melhor: unknown = null;
+    let melhorLen = Infinity;
+    for (const raw of todos) {
       const el = raw as {
         textContent: string | null;
         getBoundingClientRect: () => { width: number; height: number };
-        click: () => void;
       };
-      const texto = (el.textContent ?? '').trim().toLowerCase();
-      if (!texto || texto.length > 500) continue;
-      if (!texto.includes(trecho)) continue;
+      const txt = normalize(el.textContent ?? '');
+      if (!txt || !txt.includes(trecho)) continue;
       const rect = el.getBoundingClientRect();
       if (rect.width < 10 || rect.height < 10) continue;
-      el.click();
-      return true;
+      if (txt.length < melhorLen) {
+        melhor = el;
+        melhorLen = txt.length;
+      }
     }
-    return false;
+    return melhor;
   }, tituloNormalizado);
 
-  if (!clicado) {
+  const elementHandle = handle.asElement() as ElementHandle<unknown> | null;
+  if (!elementHandle) {
+    await handle.dispose().catch(() => {});
     console.log(`escola: não encontrou elemento clicável para "${tituloNormalizado.slice(0, 40)}"`);
     return '';
   }
 
+  // ElementHandle.click() auto-scrolla e usa o mouse real do Chromium (mais compatível com SPAs)
+  await elementHandle.click({ delay: 40 }).catch(async (err) => {
+    console.log(`escola: ElementHandle.click falhou, tentando fallback:`, err instanceof Error ? err.message : err);
+    await elementHandle.evaluate((el) => (el as unknown as { click: () => void }).click()).catch(() => {});
+  });
+  await elementHandle.dispose().catch(() => {});
+
   // Aguarda renderização do detalhe (SPA) e estabiliza
-  await new Promise((r) => setTimeout(r, 2500));
+  await new Promise((r) => setTimeout(r, 3500));
 
   const screenshot = (await page.screenshot({ encoding: 'base64', fullPage: true })) as string;
 
@@ -313,11 +337,14 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
 
   const texto = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
 
-  // Tenta voltar para a lista: back do navegador, depois tecla Escape como fallback
-  await page.goBack({ waitUntil: 'networkidle2', timeout: 8000 }).catch(async () => {
-    await page.keyboard.press('Escape').catch(() => {});
-    await new Promise((r) => setTimeout(r, 1500));
-  });
+  // Volta para a lista: tenta Escape primeiro (comum em modais de SPA), depois goBack.
+  await page.keyboard.press('Escape').catch(() => {});
+  await new Promise((r) => setTimeout(r, 1200));
+  // Se ainda não estamos na lista (heurística: URL contém "inbox" ou "feed"), tenta goBack
+  const url = page.url();
+  if (!/inbox|feed/i.test(url)) {
+    await page.goBack({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => {});
+  }
 
   return texto;
 }
