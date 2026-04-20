@@ -12,7 +12,7 @@ Responde sempre em português brasileiro, com foco em ser direto, conciso e úti
 | Camada | Tecnologia |
 |--------|-----------|
 | Runtime | Node.js 20 + TypeScript |
-| LLM | Google Gemini 2.0 Flash (`@google/genai`) |
+| LLM | Google Gemini 2.5 Flash (`@google/genai`) |
 | Bot | Telegram (`node-telegram-bot-api`) |
 | HTTP | Express 4 |
 | Agendamento | node-cron |
@@ -33,6 +33,7 @@ mig/
 ├── package.json
 ├── tsconfig.json
 ├── railway.toml               ← config de deploy
+├── nixpacks.toml              ← config nixpacks (Chromium para Puppeteer)
 ├── prisma/
 │   └── schema.prisma          ← modelos Message e Config
 ├── public/
@@ -40,13 +41,16 @@ mig/
 │   └── manifest.json          ← manifest para "Adicionar à tela inicial"
 ├── src/
 │   ├── index.ts               ← entry point: Express + Telegram + crons
-│   ├── crons.ts               ← todos os cron jobs (Cartola sábado 20h)
+│   ├── crons.ts               ← todos os cron jobs (Cartola, escola, notícias)
 │   ├── routes/
 │   │   └── chat.ts            ← POST /api/chat (usado pelo PWA)
 │   ├── services/
 │   │   ├── agente.ts          ← loop agêntico Gemini (histórico em memória)
-│   │   ├── cartola.ts         ← integração Cartola FC
-│   │   └── telegram.ts        ← bot Telegram (polling + envio proativo)
+│   │   ├── cartola.ts         ← integração Cartola FC (Puppeteer + cookie cache)
+│   │   ├── escola.ts          ← portal escolar Layers Digital (Puppeteer + Gemini Vision)
+│   │   ├── email.ts           ← envio de e-mail Outlook com agenda .ics (nodemailer)
+│   │   ├── noticias.ts        ← resumo de notícias de IA via Google Search grounding
+│   │   └── telegram.ts        ← bot Telegram (polling + stopPolling no SIGTERM)
 │   └── tools/
 │       ├── definitions.ts     ← FunctionDeclaration[] para o Gemini
 │       └── executor.ts        ← executa cada tool call por nome
@@ -88,6 +92,25 @@ Usuário envia mensagem
 Histórico em memória: `Map<chatId, Content[]>`, limitado a 40 mensagens (20 turns).
 Cada canal (Telegram chatId, "web") tem seu histórico independente.
 
+### Tools disponíveis
+
+| Tool | Descrição |
+|------|-----------|
+| `sugerir_time_cartola(orcamento?)` | Sugere escalação com base em preço e média (dados públicos) |
+| `pontuacao_cartola()` | Consulta pontuação do time do usuário (requer autenticação via Puppeteer) |
+| `status_mercado_cartola()` | Verifica se o mercado está aberto/fechado e a rodada atual |
+| `verificar_escola_agora()` | Busca comunicados, filtra importantes com Gemini e envia e-mail |
+| `comunicados_escola(limite?)` | Retorna lista de comunicados recentes do portal escolar |
+| `noticias_ia()` | Busca e resume notícias de IA das últimas 48h via Google Search grounding |
+
+### Cron jobs ativos
+
+| Horário | Job |
+|---------|-----|
+| Sábados 20h | Pontuação do Cartola (se mercado aberto, avisa para escalar) |
+| Diário 7h, 13h, 18h | Comunicados da escola do Lucas (filtra importantes, envia .ics se tiver datas) |
+| Diário 12h | Resumo de notícias de IA via Google Search grounding |
+
 ---
 
 ## Como adicionar uma nova integração
@@ -123,8 +146,13 @@ Cada canal (Telegram chatId, "web") tem seu histórico independente.
 | `GEMINI_API_KEY` | ✅ | Chave da API do Google Gemini |
 | `TELEGRAM_BOT_TOKEN` | ✅ | Token do bot no @BotFather |
 | `TELEGRAM_ALLOWED_CHAT_ID` | ✅ | ID do chat autorizado (só um) |
-| `CARTOLA_EMAIL` | ❌ | Email Globo (pontuação do time) |
-| `CARTOLA_SENHA` | ❌ | Senha Globo (pontuação do time) |
+| `CARTOLA_EMAIL` | ❌ | Email Globo (pontuação do time via Puppeteer) |
+| `CARTOLA_SENHA` | ❌ | Senha Globo (pontuação do time via Puppeteer) |
+| `ESCOLA_EMAIL` | ❌ | Email do portal escolar Layers Digital |
+| `ESCOLA_SENHA` | ❌ | Senha do portal escolar Layers Digital |
+| `EMAIL_USER` | ❌ | Conta Outlook para envio de e-mails (SMTP) |
+| `EMAIL_PASS` | ❌ | Senha de app do Outlook (não a senha principal) |
+| `EMAIL_DESTINO` | ❌ | Destinatário dos e-mails (padrão: `miguelgos@live.com`) |
 | `DATABASE_URL` | ❌ | Padrão: `file:./dev.db` |
 | `PORT` | ❌ | Padrão: `3000` |
 
@@ -160,7 +188,12 @@ npm run test:watch   # testes em modo watch
 
 ## Backlog de integrações futuras
 
-- **Loteria Federal** — resultados via API pública da Caixa
-- **App da escola** — OCR via Gemini Vision para avisos/comunicados
-- **Google Calendar** — consultar e criar eventos
-- **Notificações configuráveis** — usuário define horário/frequência via chat
+- ✅ **Cartola FC** — sugestão de escalação e pontuação via Puppeteer
+- ✅ **App da escola** — OCR via Gemini Vision para avisos/comunicados (Layers Digital)
+- ✅ **E-mail com agenda .ics** — envio de comunicados com datas via Outlook/nodemailer
+- ✅ **Notícias de IA** — Google Search grounding via Gemini
+- ✅ **Cron jobs de notificação** — escola 3x/dia, Cartola sábados, notícias ao meio-dia
+- ❌ **Loteria Federal** — resultados via API pública da Caixa
+- ❌ **Google Calendar** — consultar e criar eventos
+- ❌ **Histórico persistente no SQLite** — hoje o histórico é apenas em memória
+- ❌ **Webhook Telegram** — hoje usa polling

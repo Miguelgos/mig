@@ -1,7 +1,7 @@
-# ADR 0001 — Uso do Google Gemini 2.0 Flash como LLM
+# ADR 0001 — Uso do Google Gemini Flash como LLM
 
-- **Data**: 2026-04-11
-- **Status**: Aceito
+- **Data**: 2026-04-13
+- **Status**: Aceito (atualizado — migrado de 2.0 Flash para 2.5 Flash)
 
 ## Contexto
 
@@ -11,7 +11,8 @@ O Mig precisa de um LLM para entender linguagem natural, executar um loop agênt
 
 | Opção | Custo (input/output por 1M tokens) | Tool use | Latência | Observações |
 |-------|-----------------------------------|----------|----------|-------------|
-| **Gemini 2.0 Flash** | ~$0,075 / $0,30 | ✅ nativo | Muito baixa | Context de 1M tokens; grátis no free tier |
+| **Gemini 2.5 Flash** | ~$0,075 / $0,30 | ✅ nativo | Muito baixa | Context de 1M tokens; grátis no free tier |
+| Gemini 2.0 Flash | ~$0,075 / $0,30 | ✅ nativo | Muito baixa | Versão anterior; substituída pela 2.5 |
 | Claude 3.5 Haiku | ~$0,80 / $4,00 | ✅ nativo | Baixa | 10x mais caro no input |
 | GPT-4o mini | ~$0,15 / $0,60 | ✅ nativo | Baixa | 2x mais caro; sem free tier generoso |
 | Groq (Llama 3) | Gratuito com limites | ❌ limitado | Muito baixa | Tool use instável; sem SLA |
@@ -19,15 +20,18 @@ O Mig precisa de um LLM para entender linguagem natural, executar um loop agênt
 
 ## Decisão
 
-Usar **Google Gemini 2.0 Flash** via SDK oficial `@google/genai`.
+Usar **Google Gemini 2.5 Flash** via SDK oficial `@google/genai`.
+
+Iniciado com Gemini 2.0 Flash em 2026-04-11; migrado para **2.5 Flash** em 2026-04-13 para aproveitar melhorias de qualidade e raciocínio mantendo o mesmo custo e latência.
 
 ## Justificativa
 
 - Melhor custo-benefício entre as opções com tool use nativo confiável
 - Free tier generoso (1500 req/dia) cobre o uso pessoal com folga
 - Context window de 1M tokens elimina preocupação com histórico longo
-- SDK oficial bem mantido com suporte a `functionDeclarations`
+- SDK oficial bem mantido com suporte a `functionDeclarations` e Google Search grounding
 - Latência baixa melhora a experiência no Telegram (digitando... desaparece rápido)
+- Gemini Vision nativo permite OCR de screenshots (usado na integração com portal escolar)
 
 ## Consequências
 
