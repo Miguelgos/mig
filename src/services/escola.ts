@@ -259,6 +259,7 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
 
   // Script de busca: menor elemento visível cujo texto normalizado contém o título.
   // Normalização remove acentos e colapsa espaços (OCR do Gemini diverge do DOM).
+  // Traversa shadow roots abertos para cobrir componentes com shadow DOM.
   const searchScript = (alvo: string) => {
     const normalize = (s: string) =>
       s
@@ -275,19 +276,35 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
     const g = globalThis as unknown as {
       document: { querySelectorAll: (s: string) => ArrayLike<unknown> };
     };
-    const todos = Array.from(g.document.querySelectorAll('*')) as unknown[];
+
+    const coletar = (raiz: { querySelectorAll: (s: string) => ArrayLike<unknown> }): unknown[] => {
+      const out: unknown[] = [];
+      const diretos = Array.from(raiz.querySelectorAll('*')) as unknown[];
+      for (const raw of diretos) {
+        out.push(raw);
+        const sr = (raw as { shadowRoot?: unknown }).shadowRoot as
+          | { querySelectorAll: (s: string) => ArrayLike<unknown> }
+          | undefined;
+        if (sr) {
+          for (const child of coletar(sr)) out.push(child);
+        }
+      }
+      return out;
+    };
+
+    const todos = coletar(g.document);
 
     let melhor: unknown = null;
     let melhorLen = Infinity;
     for (const raw of todos) {
       const el = raw as {
         textContent: string | null;
-        getBoundingClientRect: () => { width: number; height: number };
+        getBoundingClientRect?: () => { width: number; height: number };
       };
       const txt = normalize(el.textContent ?? '');
       if (!txt || !txt.includes(trecho)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 10 || rect.height < 10) continue;
+      const rect = el.getBoundingClientRect?.();
+      if (!rect || rect.width < 10 || rect.height < 10) continue;
       if (txt.length < melhorLen) {
         melhor = el;
         melhorLen = txt.length;
@@ -296,8 +313,13 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
     return melhor;
   };
 
-  // Tenta no document principal e em todos os iframes (Layers pode renderizar feed em iframe)
+  // Tenta no document principal e em todos os iframes (Layers embeda apps em iframe)
   const frames = page.frames();
+  console.log(
+    `escola: procurando "${tituloNormalizado.slice(0, 30)}" em ${frames.length} frame(s): ${frames
+      .map((f) => f.url().slice(0, 80))
+      .join(' | ')}`
+  );
   let elementHandle: ElementHandle<unknown> | null = null;
   for (const frame of frames) {
     const handle = await frame.evaluateHandle(searchScript, tituloNormalizado).catch(() => null);
