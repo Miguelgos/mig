@@ -1,5 +1,9 @@
 import puppeteer, { type Browser, type Page, type ElementHandle } from 'puppeteer-core';
 import { execSync } from 'child_process';
+import Anthropic from '@anthropic-ai/sdk';
+
+const VISION_MODEL = 'claude-sonnet-4-6';
+const anthropic = new Anthropic();
 
 const LOGIN_URL =
   'https://id.layers.digital/?context=web&community=morumbisul&location=%2Fportal%2F%40admin%3Alayers-comunicados%2Ffeed%2Finbox';
@@ -157,17 +161,18 @@ async function launchAndLogin(): Promise<{ browser: Browser; page: Page }> {
   return { browser, page };
 }
 
-/** Retry com backoff exponencial para erros transitórios do Gemini (503/429). */
-export async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+/** Retry com backoff exponencial para erros transitórios (429/5xx/overloaded). */
+export async function anthropicRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
   let delay = 3000;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const isTransient = msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+      const isTransient =
+        err instanceof Anthropic.RateLimitError ||
+        (err instanceof Anthropic.APIError && err.status !== undefined && err.status >= 500);
       if (isTransient && attempt < maxAttempts) {
-        console.log(`escola: Gemini erro transitório (tentativa ${attempt}/${maxAttempts}), aguardando ${delay}ms...`);
+        console.log(`escola: Claude erro transitório (tentativa ${attempt}/${maxAttempts}), aguardando ${delay}ms...`);
         await new Promise((r) => setTimeout(r, delay));
         delay = Math.min(delay * 2, 30000);
       } else {
@@ -175,25 +180,42 @@ export async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Pro
       }
     }
   }
-  throw new Error('geminiRetry: máximo de tentativas excedido');
+  throw new Error('anthropicRetry: máximo de tentativas excedido');
 }
 
-/** Pede ao Gemini para descrever brevemente o estado da página (para debug). */
+/** Extrai o texto do primeiro bloco de texto de uma resposta do Claude. */
+function extrairTexto(response: Anthropic.Message): string {
+  const block = response.content.find((b) => b.type === 'text');
+  return block?.type === 'text' ? block.text : '';
+}
+
+/** Monta uma mensagem de vision (imagem base64 + prompt de texto). */
+function visionMessages(imageBase64: string, prompt: string): Anthropic.MessageParam[] {
+  return [
+    {
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
+        { type: 'text', text: prompt },
+      ],
+    },
+  ];
+}
+
+/** Pede ao Claude para descrever brevemente o estado da página (para debug). */
 async function descreverPagina(imageBase64: string): Promise<string> {
   try {
-    const { GoogleGenAI } = await import('@google/genai');
-    const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
-    const r = await geminiRetry(() => genai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{
-        role: 'user',
-        parts: [
-          { inlineData: { mimeType: 'image/png', data: imageBase64 } },
-          { text: 'Descreva em 1 frase o que está sendo exibido nesta tela (ex: formulário de login com campo de email, lista de comunicados, erro, etc).' },
-        ],
-      }],
-    }));
-    return r.candidates?.[0]?.content?.parts?.[0]?.text ?? 'desconhecido';
+    const response = await anthropicRetry(() =>
+      anthropic.messages.create({
+        model: VISION_MODEL,
+        max_tokens: 128,
+        messages: visionMessages(
+          imageBase64,
+          'Descreva em 1 frase o que está sendo exibido nesta tela (ex: formulário de login com campo de email, lista de comunicados, erro, etc).'
+        ),
+      })
+    );
+    return extrairTexto(response) || 'desconhecido';
   } catch {
     return 'não foi possível descrever';
   }
@@ -351,27 +373,18 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
 
   const screenshot = (await page.screenshot({ encoding: 'base64', fullPage: true })) as string;
 
-  const { GoogleGenAI } = await import('@google/genai');
-  const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
-
-  const response = await geminiRetry(() =>
-    genai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType: 'image/png', data: screenshot } },
-            {
-              text: `Esta é a tela de um comunicado escolar aberto. Extraia o conteúdo completo do comunicado em texto corrido: corpo da mensagem, datas, horários, o que fazer, material necessário, links visíveis. Ignore menus, cabeçalhos e barras laterais. Responda em português, sem markdown, em até 800 caracteres. Se a tela não mostrar um comunicado aberto, responda com a string vazia.`,
-            },
-          ],
-        },
-      ],
+  const response = await anthropicRetry(() =>
+    anthropic.messages.create({
+      model: VISION_MODEL,
+      max_tokens: 800,
+      messages: visionMessages(
+        screenshot,
+        `Esta é a tela de um comunicado escolar aberto. Extraia o conteúdo completo do comunicado em texto corrido: corpo da mensagem, datas, horários, o que fazer, material necessário, links visíveis. Ignore menus, cabeçalhos e barras laterais. Responda em português, sem markdown, em até 800 caracteres. Se a tela não mostrar um comunicado aberto, responda com a string vazia.`
+      ),
     })
   );
 
-  const texto = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+  const texto = extrairTexto(response).trim();
 
   // Volta para a lista: tenta Escape primeiro (comum em modais de SPA), depois goBack.
   await page.keyboard.press('Escape').catch(() => {});
@@ -385,22 +398,15 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
   return texto;
 }
 
-/** Usa Gemini Vision para extrair comunicados de um screenshot em base64. */
+/** Usa Claude Vision para extrair comunicados de um screenshot em base64. */
 async function extrairComImagemGemini(imageBase64: string): Promise<Comunicado[]> {
-  const { GoogleGenAI } = await import('@google/genai');
-  const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
-
-  const response = await geminiRetry(() => genai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          {
-            inlineData: { mimeType: 'image/png', data: imageBase64 },
-          },
-          {
-            text: `Esta é uma tela de comunicados escolares. Extraia todos os comunicados ou avisos visíveis e retorne um JSON válido:
+  const response = await anthropicRetry(() =>
+    anthropic.messages.create({
+      model: VISION_MODEL,
+      max_tokens: 2048,
+      messages: visionMessages(
+        imageBase64,
+        `Esta é uma tela de comunicados escolares. Extraia todos os comunicados ou avisos visíveis e retorne um JSON válido:
 [
   {
     "titulo": "Título do comunicado",
@@ -410,21 +416,19 @@ async function extrairComImagemGemini(imageBase64: string): Promise<Comunicado[]
   }
 ]
 Se a tela mostrar login ou erro, retorne [].
-Retorne APENAS o JSON, sem markdown.`,
-          },
-        ],
-      },
-    ],
-  }));
+Retorne APENAS o JSON, sem markdown.`
+      ),
+    })
+  );
 
-  const text = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+  const text = extrairTexto(response) || '[]';
   const clean = text.replace(/```json\n?|\n?```/g, '').trim();
 
   try {
     const parsed = JSON.parse(clean);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
-    console.error('escola: falha ao parsear JSON do Gemini:', clean.slice(0, 300));
+    console.error('escola: falha ao parsear JSON do Claude:', clean.slice(0, 300));
     return [];
   }
 }

@@ -17,7 +17,7 @@ cp .env.example .env
 # Editar .env com suas chaves
 ```
 
-Variáveis obrigatórias: `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`.
+Variáveis obrigatórias: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`.
 
 Variáveis opcionais por integração:
 
@@ -71,15 +71,8 @@ Acesse `http://localhost:3000` para o chat web.
 
 - Envia e-mails via Outlook (SMTP smtp-mail.outlook.com:587)
 - Usa `ical-generator` para criar eventos `.ics` a partir de texto em linguagem natural
-- Gemini extrai data/hora do texto para montar o evento
+- Claude extrai data/hora do texto para montar o evento
 - Requer `EMAIL_USER` e `EMAIL_PASS` (senha de app, não a senha principal da conta)
-
-### Notícias de IA
-
-- Usa Google Search grounding via Gemini para buscar notícias recentes
-- Foco: Claude Code, APIs da Anthropic/OpenAI/Gemini, agentes em produção
-- Retorna até 5 notícias das últimas 48h em português
-- Cron automático diário ao meio-dia
 
 ## Deploy no Railway
 

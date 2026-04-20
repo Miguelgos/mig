@@ -12,7 +12,7 @@ Responde sempre em português brasileiro, com foco em ser direto, conciso e úti
 | Camada | Tecnologia |
 |--------|-----------|
 | Runtime | Node.js 20 + TypeScript |
-| LLM | Google Gemini 2.5 Flash (`@google/genai`) |
+| LLM | Claude Sonnet 4.6 (`@anthropic-ai/sdk`) |
 | Bot | Telegram (`node-telegram-bot-api`) |
 | HTTP | Express 4 |
 | Agendamento | node-cron |
@@ -47,10 +47,9 @@ mig/
 │   ├── services/
 │   │   ├── agente.ts          ← loop agêntico Gemini (histórico em memória)
 │   │   ├── cartola.ts         ← integração Cartola FC (Puppeteer + cookie cache)
-│   │   ├── escola.ts          ← portal escolar Layers Digital (Puppeteer + Gemini Vision)
-│   │   ├── eatsimple.ts       ← saldo da lanchonete (Puppeteer + Gemini Vision)
+│   │   ├── escola.ts          ← portal escolar Layers Digital (Puppeteer + Claude Vision)
+│   │   ├── eatsimple.ts       ← saldo da lanchonete (Puppeteer + Claude Vision)
 │   │   ├── email.ts           ← envio de e-mail Outlook com agenda .ics (nodemailer)
-│   │   ├── noticias.ts        ← resumo de notícias de IA via Google Search grounding
 │   │   └── telegram.ts        ← bot Telegram (polling + stopPolling no SIGTERM)
 │   └── tools/
 │       ├── definitions.ts     ← FunctionDeclaration[] para o Gemini
@@ -103,7 +102,6 @@ Cada canal (Telegram chatId, "web") tem seu histórico independente.
 | `verificar_escola_agora()` | Busca comunicados, filtra importantes com Gemini e envia e-mail |
 | `comunicados_escola(limite?)` | Retorna lista de comunicados recentes do portal escolar |
 | `saldo_lanchonete()` | Consulta saldo da lanchonete do Lucas no Eat Simple |
-| `noticias_ia()` | Busca e resume notícias de IA das últimas 48h via Google Search grounding |
 
 ### Cron jobs ativos
 
@@ -112,7 +110,6 @@ Cada canal (Telegram chatId, "web") tem seu histórico independente.
 | Sábados 20h | Pontuação do Cartola (se mercado aberto, avisa para escalar) |
 | Diário 7h, 13h, 18h | Comunicados da escola do Lucas (filtra importantes, envia .ics se tiver datas) |
 | Seg–Sex 6:30 | Saldo da lanchonete do Lucas (Eat Simple) |
-| Diário 12h | Resumo de notícias de IA via Google Search grounding |
 
 ---
 
@@ -146,7 +143,7 @@ Cada canal (Telegram chatId, "web") tem seu histórico independente.
 
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
-| `GEMINI_API_KEY` | ✅ | Chave da API do Google Gemini |
+| `ANTHROPIC_API_KEY` | ✅ | Chave da API da Anthropic (Claude) |
 | `TELEGRAM_BOT_TOKEN` | ✅ | Token do bot no @BotFather |
 | `TELEGRAM_ALLOWED_CHAT_ID` | ✅ | ID do chat autorizado (só um) |
 | `CARTOLA_EMAIL` | ❌ | Email Globo (pontuação do time via Puppeteer) |
@@ -194,9 +191,8 @@ npm run test:watch   # testes em modo watch
 - ✅ **Cartola FC** — sugestão de escalação e pontuação via Puppeteer
 - ✅ **App da escola** — OCR via Gemini Vision para avisos/comunicados (Layers Digital)
 - ✅ **E-mail com agenda .ics** — envio de comunicados com datas via Outlook/nodemailer
-- ✅ **Notícias de IA** — Google Search grounding via Gemini
-- ✅ **Lanchonete da escola** — saldo via Eat Simple (Puppeteer + Gemini Vision)
-- ✅ **Cron jobs de notificação** — escola 3x/dia, Cartola sábados, notícias ao meio-dia, lanchonete seg-sex 6h30
+- ✅ **Lanchonete da escola** — saldo via Eat Simple (Puppeteer + Claude Vision)
+- ✅ **Cron jobs de notificação** — escola 3x/dia, Cartola sábados, lanchonete seg-sex 6h30
 - ❌ **Loteria Federal** — resultados via API pública da Caixa
 - ❌ **Google Calendar** — consultar e criar eventos
 - ❌ **Histórico persistente no SQLite** — hoje o histórico é apenas em memória

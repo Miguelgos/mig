@@ -14,7 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@google/genai": "^0.7.0",
+    "@anthropic-ai/sdk": "^0.90.0",
     "@prisma/client": "^5.22.0",
     "@types/nodemailer": "^8.0.0",
     "axios": "^1.7.9",

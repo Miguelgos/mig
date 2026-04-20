@@ -2,7 +2,7 @@
 
 ## Visão geral
 
-Bot do Telegram que recebe mensagens do Miguel, passa pelo loop agêntico do Gemini e responde.
+Bot do Telegram que recebe mensagens do Miguel, passa pelo loop agêntico do Claude e responde.
 Suporta também envio proativo de notificações via cron jobs.
 
 ## Configuração inicial
@@ -36,7 +36,7 @@ Desvantagem: latência marginal (~1s) vs webhook.
 Telegram → polling → handler → runAgentLoop(chatId, text)
                                       │
                                       ▼
-                              Gemini (com tools)
+                              Claude (com tools)
                                       │
                                       ▼
                               bot.sendMessage(chatId, reply)
@@ -51,7 +51,7 @@ Acesso negado. Este assistente é privado.
 
 ## Parse mode
 
-Respostas enviadas com `parse_mode: 'Markdown'` — o Gemini pode usar:
+Respostas enviadas com `parse_mode: 'Markdown'` — o Claude pode usar:
 - `**negrito**`
 - `` `código` ``
 - Listas com `-`

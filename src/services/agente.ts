@@ -1,26 +1,28 @@
-import { GoogleGenAI, type Content, type Part } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import { toolDefinitions } from '../tools/definitions';
 import { executeTool } from '../tools/executor';
 
-const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
+const anthropic = new Anthropic();
 
 // Histórico em memória por chatId: máximo 20 turns (40 mensagens)
-const histories = new Map<string, Content[]>();
+const histories = new Map<string, Anthropic.MessageParam[]>();
 
 const MAX_TURNS = 20;
 const MAX_TOOL_CALLS = 10; // limite de segurança por iteração
+const MODEL = 'claude-sonnet-4-6';
 
-/** Retry com backoff exponencial para erros transitórios do Gemini (503/429). */
-async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+/** Retry com backoff exponencial para erros transitórios (429/5xx/overloaded). */
+async function anthropicRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
   let delay = 3000;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const isTransient = msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+      const isTransient =
+        err instanceof Anthropic.RateLimitError ||
+        (err instanceof Anthropic.APIError && err.status !== undefined && err.status >= 500);
       if (isTransient && attempt < maxAttempts) {
-        console.log(`agente: Gemini erro transitório (tentativa ${attempt}/${maxAttempts}), aguardando ${delay}ms...`);
+        console.log(`agente: erro transitório (tentativa ${attempt}/${maxAttempts}), aguardando ${delay}ms...`);
         await new Promise((r) => setTimeout(r, delay));
         delay = Math.min(delay * 2, 30000);
       } else {
@@ -28,7 +30,7 @@ async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T>
       }
     }
   }
-  throw new Error('geminiRetry: máximo de tentativas excedido');
+  throw new Error('anthropicRetry: máximo de tentativas excedido');
 }
 
 const SYSTEM_INSTRUCTION = `Você é o Mig, assistente pessoal do Miguel.
@@ -36,82 +38,55 @@ const SYSTEM_INSTRUCTION = `Você é o Mig, assistente pessoal do Miguel.
 Regras:
 - Responda sempre em português brasileiro
 - Seja direto, conciso e útil
-- Use as tools disponíveis quando o usuário pedir informações do Cartola FC
+- Use as tools disponíveis quando o usuário pedir informações do Cartola FC, escola do Lucas ou lanchonete
 - Nunca invente dados — use as tools para obter informações reais
 - Quando não souber algo, diga claramente`;
 
 /**
- * Executa o loop agêntico do Gemini para um chatId e mensagem.
+ * Executa o loop agêntico do Claude para um chatId e mensagem.
  * Mantém histórico em memória, limitado a MAX_TURNS turns.
  */
 export async function runAgentLoop(chatId: string, userMessage: string): Promise<string> {
   const history = histories.get(chatId) ?? [];
 
-  // Adiciona mensagem do usuário ao histórico
-  const userContent: Content = {
-    role: 'user',
-    parts: [{ text: userMessage }],
-  };
-  history.push(userContent);
+  history.push({ role: 'user', content: userMessage });
 
   let toolCallCount = 0;
   let finalResponse = '';
 
-  // Loop agêntico: continua enquanto o modelo retornar function calls
   while (toolCallCount < MAX_TOOL_CALLS) {
-    const response = await geminiRetry(() => genai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: history,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        tools: [{ functionDeclarations: toolDefinitions }],
-      },
-    }));
-
-    const candidate = response.candidates?.[0];
-    if (!candidate?.content) {
-      finalResponse = 'Desculpe, não consegui gerar uma resposta.';
-      break;
-    }
-
-    const parts: Part[] = candidate.content.parts ?? [];
-    const hasFunctionCall = parts.some((p) => p.functionCall != null);
-
-    if (!hasFunctionCall) {
-      // Resposta de texto final
-      finalResponse = parts
-        .filter((p) => p.text != null)
-        .map((p) => p.text)
-        .join('');
-
-      // Adiciona resposta do modelo ao histórico
-      history.push({ role: 'model', parts });
-      break;
-    }
-
-    // Adiciona a resposta do modelo com function calls ao histórico
-    history.push({ role: 'model', parts });
-
-    // Executa todas as function calls em paralelo
-    const functionCallParts = parts.filter((p) => p.functionCall != null);
-    const functionResponseParts: Part[] = await Promise.all(
-      functionCallParts.map(async (p) => {
-        const fc = p.functionCall!;
-        const result = await executeTool(
-          fc.name ?? '',
-          (fc.args as Record<string, unknown>) ?? {}
-        );
-        return {
-          functionResponse: {
-            name: fc.name ?? '',
-            response: { result },
-          },
-        } as Part;
+    const response = await anthropicRetry(() =>
+      anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 4096,
+        system: SYSTEM_INSTRUCTION,
+        tools: toolDefinitions,
+        messages: history,
       })
     );
 
-    // Adiciona resultados das tools ao histórico como mensagem "user"
-    history.push({ role: 'user', parts: functionResponseParts });
+    // Adiciona a resposta do assistente ao histórico
+    history.push({ role: 'assistant', content: response.content });
+
+    if (response.stop_reason !== 'tool_use') {
+      // Resposta textual final
+      finalResponse = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+      break;
+    }
+
+    // Executa cada tool_use e monta os tool_result
+    const toolUses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
+      toolUses.map(async (t) => {
+        const result = await executeTool(t.name, (t.input as Record<string, unknown>) ?? {});
+        return { type: 'tool_result', tool_use_id: t.id, content: result };
+      })
+    );
+
+    history.push({ role: 'user', content: toolResults });
     toolCallCount++;
   }
 
@@ -126,7 +101,7 @@ export async function runAgentLoop(chatId: string, userMessage: string): Promise
   }
 
   histories.set(chatId, history);
-  return finalResponse;
+  return finalResponse || 'Desculpe, não consegui gerar uma resposta.';
 }
 
 /** Limpa o histórico de um chatId específico. */

@@ -1,7 +1,7 @@
 # ADR 0001 — Uso do Google Gemini Flash como LLM
 
 - **Data**: 2026-04-13
-- **Status**: Aceito (atualizado — migrado de 2.0 Flash para 2.5 Flash)
+- **Status**: Superado em 2026-04-20 — ver [ADR 0002](./0002-claude-sonnet.md)
 
 ## Contexto
 

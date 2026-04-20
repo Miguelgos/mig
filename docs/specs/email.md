@@ -35,13 +35,13 @@ Usa **senha de app** do Outlook, não a senha principal da conta. Para gerar uma
 
 Quando um comunicado contém data/hora de evento (ex: "reunião de pais na sexta às 19h"), o serviço:
 
-1. Passa o texto do comunicado para o **Gemini**, que extrai data, hora e descrição em linguagem natural
+1. Passa o texto do comunicado para o **Claude**, que extrai data, hora e descrição em linguagem natural
 2. Usa `ical-generator` para criar um arquivo `.ics` com o evento
 3. Anexa o `.ics` ao e-mail — ao abrir, o cliente de e-mail oferece "Adicionar ao calendário"
 
-### Extração de data pelo Gemini
+### Extração de data pelo Claude
 
-O Gemini recebe o texto do comunicado e retorna um objeto JSON com:
+O Claude recebe o texto do comunicado e retorna um objeto JSON com:
 
 ```json
 {
@@ -60,7 +60,7 @@ Se não houver data identificável no texto, nenhum `.ics` é gerado e o e-mail 
 Comunicado com possível data
         │
         ▼
-Gemini extrai data/hora (linguagem natural → ISO 8601)
+Claude extrai data/hora (linguagem natural → ISO 8601)
         │
         ├── Data encontrada? ──► ical-generator cria evento .ics
         │                               │

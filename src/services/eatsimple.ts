@@ -1,6 +1,9 @@
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
-import { GoogleGenAI } from '@google/genai';
-import { getChromiumPath, geminiRetry } from './escola';
+import Anthropic from '@anthropic-ai/sdk';
+import { getChromiumPath, anthropicRetry } from './escola';
+
+const VISION_MODEL = 'claude-sonnet-4-6';
+const anthropic = new Anthropic();
 
 const LOGIN_URL = 'https://www.eatsimple.com.br/login';
 
@@ -117,19 +120,19 @@ export async function consultarSaldo(): Promise<SaldoLanchonete> {
   }
 }
 
-/** Usa Gemini Vision para extrair saldo e nome do aluno de um screenshot. */
+/** Usa Claude Vision para extrair saldo e nome do aluno de um screenshot. */
 async function extrairSaldoGemini(imageBase64: string): Promise<{ aluno: string; saldo: string }> {
-  const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
-
-  const response = await geminiRetry(() =>
-    genai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
+  const response = await anthropicRetry(() =>
+    anthropic.messages.create({
+      model: VISION_MODEL,
+      max_tokens: 256,
+      messages: [
         {
           role: 'user',
-          parts: [
-            { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
             {
+              type: 'text',
               text: `Esta é a tela do portal Eat Simple (lanchonete escolar). Extraia:
 - aluno: nome do aluno exibido (primeiro nome é suficiente)
 - saldo: o valor de saldo/crédito visível, no formato "R$ XX,YY"
@@ -145,14 +148,15 @@ Se não encontrar o saldo, use "indisponível".`,
     })
   );
 
-  const texto = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+  const bloco = response.content.find((b) => b.type === 'text');
+  const texto = bloco?.type === 'text' ? bloco.text : '{}';
   const limpo = texto.replace(/```json\n?|\n?```/g, '').trim();
 
   try {
     const parsed = JSON.parse(limpo) as { aluno?: string; saldo?: string };
     return { aluno: parsed.aluno ?? '', saldo: parsed.saldo ?? 'indisponível' };
   } catch {
-    console.error('eatsimple: falha ao parsear JSON do Gemini:', limpo.slice(0, 200));
+    console.error('eatsimple: falha ao parsear JSON do Claude:', limpo.slice(0, 200));
     return { aluno: '', saldo: 'indisponível' };
   }
 }

@@ -5,8 +5,7 @@ import { consultarPontuacao, statusMercado } from './services/cartola';
 import { buscarComunicados, type Comunicado } from './services/escola';
 import { enviarAgenda } from './services/email';
 import { consultarSaldo } from './services/eatsimple';
-import { buscarNoticiasIA } from './services/noticias';
-import { GoogleGenAI } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from './db';
 
 /** Identificador estável de um comunicado para dedup persistente. */
@@ -85,23 +84,6 @@ export function scheduleCrons(): void {
     { timezone: 'America/Sao_Paulo' }
   );
 
-  // Todo dia ao meio-dia: resumo de notícias de IA
-  cron.schedule(
-    '0 12 * * *',
-    async () => {
-      console.log('cron: buscando notícias de IA...');
-      try {
-        const { resumo } = await buscarNoticiasIA();
-        const data = new Date().toLocaleDateString('pt-BR');
-        await sendMessage(`🤖 *Notícias de IA — ${data}*\n\n${resumo}`);
-        console.log('cron noticias: resumo enviado.');
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('cron noticias:', message);
-      }
-    },
-    { timezone: 'America/Sao_Paulo' }
-  );
 
   console.log('Cron jobs agendados.');
 }
@@ -174,24 +156,25 @@ async function verificarComunicadosEscola(): Promise<void> {
   }
 }
 
-/** Usa Gemini para filtrar apenas os comunicados relevantes/urgentes. */
+/** Usa Claude para filtrar apenas os comunicados relevantes/urgentes. */
 export async function filtrarImportantesExport(comunicados: Comunicado[]): Promise<Comunicado[]> {
   return filtrarImportantes(comunicados);
 }
 
 async function filtrarImportantes(comunicados: Comunicado[]): Promise<Comunicado[]> {
-  const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
+  const anthropic = new Anthropic();
 
   const lista = comunicados
     .map((c, i) => `${i + 1}. Título: ${c.titulo} | Resumo: ${c.resumo}`)
     .join('\n');
 
-  const response = await genai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [{
-      role: 'user',
-      parts: [{
-        text: `Você é um assistente que ajuda um pai a acompanhar a escola do filho Lucas.
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 256,
+    messages: [
+      {
+        role: 'user',
+        content: `Você é um assistente que ajuda um pai a acompanhar a escola do filho Lucas.
 
 Analise estes comunicados escolares e retorne APENAS os índices (números) dos que são importantes ou urgentes para um pai saber:
 - Eventos, datas importantes, provas, reuniões de pais
@@ -204,12 +187,13 @@ Comunicados:
 ${lista}
 
 Retorne apenas os números separados por vírgula (ex: 1,3,5) ou "nenhum" se nenhum for importante.`,
-      }],
-    }],
+      },
+    ],
   });
 
-  const resposta = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? 'nenhum';
-  console.log('cron escola: Gemini avaliou como importantes:', resposta);
+  const bloco = response.content.find((b) => b.type === 'text');
+  const resposta = (bloco?.type === 'text' ? bloco.text : 'nenhum').trim();
+  console.log('cron escola: Claude avaliou como importantes:', resposta);
 
   if (resposta.toLowerCase() === 'nenhum') return [];
 

@@ -2,7 +2,6 @@ import { sugerirTime, consultarPontuacao, statusMercado } from '../services/cart
 import { buscarComunicados } from '../services/escola';
 import { consultarSaldo } from '../services/eatsimple';
 import { enviarAgenda } from '../services/email';
-import { buscarNoticiasIA } from '../services/noticias';
 
 /**
  * Executa uma tool call retornada pelo Gemini.
@@ -27,11 +26,6 @@ export async function executeTool(
 
       case 'status_mercado_cartola': {
         const resultado = await statusMercado();
-        return JSON.stringify(resultado);
-      }
-
-      case 'noticias_ia': {
-        const resultado = await buscarNoticiasIA();
         return JSON.stringify(resultado);
       }
 

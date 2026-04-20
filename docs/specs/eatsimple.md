@@ -4,7 +4,7 @@
 
 Integração com o portal **Eat Simple** (`eatsimple.com.br`) para consulta do
 saldo/crédito da lanchonete do Lucas. O portal não tem API pública — usamos
-Puppeteer para fazer login e Gemini Vision para extrair o saldo da tela.
+Puppeteer para fazer login e Claude Vision para extrair o saldo da tela.
 
 ## Plataforma
 
@@ -30,7 +30,7 @@ Puppeteer para fazer login e Gemini Vision para extrair o saldo da tela.
 4. Screenshot full-page da home do portal
         │
         ▼
-5. Gemini Vision extrai aluno + saldo em JSON
+5. Claude Vision extrai aluno + saldo em JSON
         │
         ▼
 6. Retorna SaldoLanchonete { aluno, saldo, atualizadoEm }
@@ -70,7 +70,7 @@ Reutiliza as mesmas credenciais do portal escolar Layers Digital:
 ## Limitações conhecidas
 
 - **Sem API oficial**: depende de scraping via screenshot + OCR
-- **Lento**: cada consulta leva ~15–25s (login + renderização + Gemini Vision)
-- **Frágil a mudanças de layout**: se o portal redesenhar a home, o Gemini pode não achar o saldo
+- **Lento**: cada consulta leva ~15–25s (login + renderização + Claude Vision)
+- **Frágil a mudanças de layout**: se o portal redesenhar a home, o Claude pode não achar o saldo
 - **Requer Chromium**: configurado via `nixpacks.toml` no Railway
 - **Credenciais compartilhadas**: assume que o login da escola é o mesmo do Eat Simple

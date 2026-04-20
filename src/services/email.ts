@@ -1,7 +1,9 @@
 import nodemailer from 'nodemailer';
 import ical, { ICalEventStatus } from 'ical-generator';
-import { GoogleGenAI } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import type { Comunicado } from './escola';
+
+const anthropic = new Anthropic();
 
 const EMAIL_USER = process.env.EMAIL_USER ?? '';
 const EMAIL_PASS = process.env.EMAIL_PASS ?? '';
@@ -26,21 +28,21 @@ export interface EventoAgenda {
 }
 
 /**
- * Usa Gemini para extrair data/hora de um comunicado em linguagem natural.
+ * Usa Claude para extrair data/hora de um comunicado em linguagem natural.
  * Retorna null se não encontrar data válida.
  */
 async function extrairData(comunicado: Comunicado): Promise<Date | null> {
   if (!comunicado.data && !comunicado.resumo) return null;
 
-  const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
   const hoje = new Date().toLocaleDateString('pt-BR');
 
-  const response = await genai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [{
-      role: 'user',
-      parts: [{
-        text: `Hoje é ${hoje}. Extraia a data do evento deste comunicado escolar e retorne APENAS no formato ISO 8601 (ex: 2026-04-15T10:00:00).
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 64,
+    messages: [
+      {
+        role: 'user',
+        content: `Hoje é ${hoje}. Extraia a data do evento deste comunicado escolar e retorne APENAS no formato ISO 8601 (ex: 2026-04-15T10:00:00).
 Se não houver hora, use 08:00:00.
 Se não houver data clara, retorne "null".
 
@@ -50,11 +52,12 @@ Data informada: ${comunicado.data}
 Resumo: ${comunicado.resumo}
 
 Retorne apenas a data ISO ou "null":`,
-      }],
-    }],
+      },
+    ],
   });
 
-  const texto = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? 'null';
+  const bloco = response.content.find((b) => b.type === 'text');
+  const texto = (bloco?.type === 'text' ? bloco.text : 'null').trim();
   if (texto === 'null' || !texto) return null;
 
   try {
