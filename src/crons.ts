@@ -1,10 +1,18 @@
 import cron from 'node-cron';
+import { createHash } from 'crypto';
 import { sendMessage } from './services/telegram';
 import { consultarPontuacao, statusMercado } from './services/cartola';
 import { buscarComunicados, type Comunicado } from './services/escola';
 import { enviarAgenda } from './services/email';
 import { buscarNoticiasIA } from './services/noticias';
 import { GoogleGenAI } from '@google/genai';
+import { prisma } from './db';
+
+/** Identificador estável de um comunicado para dedup persistente. */
+function fingerprintComunicado(c: Comunicado): string {
+  const base = `${c.titulo}|${c.autor}|${c.data}`.toLowerCase().replace(/\s+/g, ' ').trim();
+  return createHash('sha1').update(base).digest('hex');
+}
 
 /**
  * Registra todos os cron jobs do Mig.
@@ -94,21 +102,36 @@ async function verificarComunicadosEscola(): Promise<void> {
       return;
     }
 
-    // Monta e envia a notificação no Telegram
+    // Filtra comunicados já enviados em execuções anteriores
+    const candidatos = importantes.map((c) => ({ c, fp: fingerprintComunicado(c) }));
+    const jaEnviados = await prisma.sentEscola.findMany({
+      where: { fingerprint: { in: candidatos.map((x) => x.fp) } },
+      select: { fingerprint: true },
+    });
+    const enviadosSet = new Set(jaEnviados.map((r) => r.fingerprint));
+    const novos = candidatos.filter((x) => !enviadosSet.has(x.fp));
+
+    if (novos.length === 0) {
+      console.log(`cron escola: todos os ${importantes.length} comunicado(s) importantes já foram enviados.`);
+      return;
+    }
+
+    // Monta e envia a notificação no Telegram com os detalhes abertos
     let msg = `🏫 *Comunicados da escola do Lucas*\n\n`;
-    for (const c of importantes) {
+    for (const { c } of novos) {
       msg += `📌 *${c.titulo}*\n`;
       if (c.autor) msg += `👤 ${c.autor}\n`;
       if (c.data) msg += `📅 ${c.data}\n`;
-      if (c.resumo) msg += `${c.resumo}\n`;
+      const corpo = c.detalhes || c.resumo;
+      if (corpo) msg += `\n${corpo}\n`;
       msg += '\n';
     }
 
     await sendMessage(msg.trim());
-    console.log(`cron escola: ${importantes.length} comunicado(s) importante(s) enviado(s).`);
+    console.log(`cron escola: ${novos.length} comunicado(s) novo(s) enviado(s).`);
 
     // Envia agenda por e-mail para comunicados com data
-    const comData = importantes.filter((c) => c.data);
+    const comData = novos.map((x) => x.c).filter((c) => c.data);
     if (comData.length > 0) {
       const enviados = await enviarAgenda(comData).catch((err) => {
         console.error('cron escola email:', err instanceof Error ? err.message : err);
@@ -118,6 +141,11 @@ async function verificarComunicadosEscola(): Promise<void> {
         await sendMessage(`📅 Agenda com ${enviados} evento${enviados > 1 ? 's' : ''} enviada para miguelgos@live.com`);
       }
     }
+
+    // Marca os comunicados como enviados para não repetir
+    await prisma.sentEscola.createMany({
+      data: novos.map(({ c, fp }) => ({ fingerprint: fp, titulo: c.titulo })),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('cron escola:', message);

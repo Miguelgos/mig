@@ -12,6 +12,7 @@ export interface Comunicado {
   autor: string;
   data: string;
   resumo: string;
+  detalhes?: string;
 }
 
 /** Localiza o Chromium disponível no ambiente, inclusive no Nix store do Railway. */
@@ -225,7 +226,20 @@ export async function buscarComunicados(limite = 5): Promise<Comunicado[]> {
     const comunicados = await extrairComImagemGemini(screenshot as string);
     console.log(`escola: ${comunicados.length} comunicado(s) extraído(s)`);
 
-    return comunicados.slice(0, limite);
+    const alvo = comunicados.slice(0, limite);
+
+    // Para cada comunicado, abre o item e extrai os detalhes completos
+    for (const c of alvo) {
+      try {
+        const detalhes = await extrairDetalhesDoComunicado(page, c.titulo);
+        if (detalhes) c.detalhes = detalhes;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`escola: falha ao abrir detalhes de "${c.titulo}":`, msg);
+      }
+    }
+
+    return alvo;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('escola buscarComunicados:', message);
@@ -233,6 +247,79 @@ export async function buscarComunicados(limite = 5): Promise<Comunicado[]> {
   } finally {
     if (browser) await browser.close();
   }
+}
+
+/**
+ * Abre um comunicado específico (clicando pelo título), captura a tela detalhada
+ * e usa Gemini Vision para extrair o conteúdo completo. Retorna string vazia se falhar.
+ */
+async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<string> {
+  const tituloNormalizado = titulo.trim();
+  if (!tituloNormalizado) return '';
+
+  // Busca e clica no elemento visível que contém o título
+  const clicado = await page.evaluate((alvo: string) => {
+    const g = globalThis as unknown as {
+      document: { querySelectorAll: (s: string) => ArrayLike<unknown> };
+    };
+    const trecho = alvo.slice(0, Math.min(40, alvo.length)).toLowerCase();
+    const candidatos = Array.from(g.document.querySelectorAll('button, a, [role="button"], li, article, div')) as unknown[];
+    for (const raw of candidatos) {
+      const el = raw as {
+        textContent: string | null;
+        getBoundingClientRect: () => { width: number; height: number };
+        click: () => void;
+      };
+      const texto = (el.textContent ?? '').trim().toLowerCase();
+      if (!texto || texto.length > 500) continue;
+      if (!texto.includes(trecho)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }, tituloNormalizado);
+
+  if (!clicado) {
+    console.log(`escola: não encontrou elemento clicável para "${tituloNormalizado.slice(0, 40)}"`);
+    return '';
+  }
+
+  // Aguarda renderização do detalhe (SPA) e estabiliza
+  await new Promise((r) => setTimeout(r, 2500));
+
+  const screenshot = (await page.screenshot({ encoding: 'base64', fullPage: true })) as string;
+
+  const { GoogleGenAI } = await import('@google/genai');
+  const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? '' });
+
+  const response = await geminiRetry(() =>
+    genai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: 'image/png', data: screenshot } },
+            {
+              text: `Esta é a tela de um comunicado escolar aberto. Extraia o conteúdo completo do comunicado em texto corrido: corpo da mensagem, datas, horários, o que fazer, material necessário, links visíveis. Ignore menus, cabeçalhos e barras laterais. Responda em português, sem markdown, em até 800 caracteres. Se a tela não mostrar um comunicado aberto, responda com a string vazia.`,
+            },
+          ],
+        },
+      ],
+    })
+  );
+
+  const texto = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+
+  // Tenta voltar para a lista: back do navegador, depois tecla Escape como fallback
+  await page.goBack({ waitUntil: 'networkidle2', timeout: 8000 }).catch(async () => {
+    await page.keyboard.press('Escape').catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500));
+  });
+
+  return texto;
 }
 
 /** Usa Gemini Vision para extrair comunicados de um screenshot em base64. */

@@ -28,3 +28,13 @@ model Config {
 
   @@index([chatId])
 }
+
+// Comunicados da escola já enviados (evita reenvio)
+model SentEscola {
+  id          Int      @id @default(autoincrement())
+  fingerprint String   @unique
+  titulo      String
+  sentAt      DateTime @default(now())
+
+  @@index([sentAt])
+}
