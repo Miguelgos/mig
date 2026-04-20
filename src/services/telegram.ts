@@ -1,5 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { runAgentLoop, clearHistory } from './agente';
+import { consultarSaldo } from './eatsimple';
 
 let bot: TelegramBot | null = null;
 
@@ -51,6 +52,24 @@ export function initTelegram(): void {
         chatId,
         'Oi, Miguel! Sou o Mig, seu assistente pessoal. Como posso ajudar?'
       );
+      return;
+    }
+
+    // Atalho: /saldo consulta direto o saldo da lanchonete (sem passar pelo agente)
+    if (text === '/saldo') {
+      await bot!.sendChatAction(chatId, 'typing');
+      try {
+        const s = await consultarSaldo();
+        await bot!.sendMessage(
+          chatId,
+          `🍔 *Lanchonete — ${s.aluno}*\n\n💰 Saldo: *${s.saldo}*\n🕕 ${s.atualizadoEm}`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('telegram /saldo:', message);
+        await bot!.sendMessage(chatId, `Não consegui consultar o saldo: ${message}`);
+      }
       return;
     }
 

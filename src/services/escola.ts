@@ -257,9 +257,9 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
   const tituloNormalizado = titulo.trim();
   if (!tituloNormalizado) return '';
 
-  // Localiza o menor elemento visível cujo texto normalizado contém o título.
+  // Script de busca: menor elemento visível cujo texto normalizado contém o título.
   // Normalização remove acentos e colapsa espaços (OCR do Gemini diverge do DOM).
-  const handle = await page.evaluateHandle((alvo: string) => {
+  const searchScript = (alvo: string) => {
     const normalize = (s: string) =>
       s
         .normalize('NFD')
@@ -294,12 +294,26 @@ async function extrairDetalhesDoComunicado(page: Page, titulo: string): Promise<
       }
     }
     return melhor;
-  }, tituloNormalizado);
+  };
 
-  const elementHandle = handle.asElement() as ElementHandle<unknown> | null;
-  if (!elementHandle) {
+  // Tenta no document principal e em todos os iframes (Layers pode renderizar feed em iframe)
+  const frames = page.frames();
+  let elementHandle: ElementHandle<unknown> | null = null;
+  for (const frame of frames) {
+    const handle = await frame.evaluateHandle(searchScript, tituloNormalizado).catch(() => null);
+    if (!handle) continue;
+    const el = handle.asElement() as ElementHandle<unknown> | null;
+    if (el) {
+      elementHandle = el;
+      break;
+    }
     await handle.dispose().catch(() => {});
-    console.log(`escola: não encontrou elemento clicável para "${tituloNormalizado.slice(0, 40)}"`);
+  }
+
+  if (!elementHandle) {
+    console.log(
+      `escola: não encontrou clicável em ${frames.length} frame(s) para "${tituloNormalizado.slice(0, 40)}"`
+    );
     return '';
   }
 
