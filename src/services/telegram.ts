@@ -122,6 +122,11 @@ export async function sendMessage(text: string): Promise<void> {
     await bot.sendMessage(ALLOWED_CHAT_ID, text, { parse_mode: 'Markdown' });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('telegram sendMessage:', message);
+    console.error('telegram sendMessage (markdown):', message);
+    try {
+      await bot.sendMessage(ALLOWED_CHAT_ID, text);
+    } catch (err2) {
+      console.error('telegram sendMessage (plain):', err2 instanceof Error ? err2.message : err2);
+    }
   }
 }

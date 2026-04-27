@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import { createHash } from 'crypto';
 import { sendMessage } from './services/telegram';
-import { consultarPontuacao, statusMercado } from './services/cartola';
 import { buscarComunicados, type Comunicado } from './services/escola';
 import { enviarAgenda } from './services/email';
 import { consultarSaldo } from './services/eatsimple';
@@ -19,50 +18,15 @@ function fingerprintComunicado(c: Comunicado): string {
  * Fuso horário: America/Sao_Paulo
  */
 export function scheduleCrons(): void {
-  // Todo sábado às 20h: notifica a pontuação do Cartola
+  // Seg a sex às 17h: verifica comunicados da escola do Lucas
   cron.schedule(
-    '0 20 * * 6',
+    '0 17 * * 1-5',
     async () => {
-      console.log('cron: verificando pontuação do Cartola...');
-
-      try {
-        const mercado = await statusMercado();
-        if (mercado.aberto) {
-          await sendMessage(
-            `⚽ *Cartola FC — Rodada ${mercado.rodada}*\n\nO mercado ainda está aberto. Certifique-se de escalar seu time!`
-          );
-          return;
-        }
-
-        const pontuacao = await consultarPontuacao();
-        await sendMessage(
-          `⚽ *Cartola FC — Rodada ${pontuacao.rodada}*\n\n` +
-            `🏆 *${pontuacao.time}*\n` +
-            `📊 Pontuação: ${pontuacao.pontos} pts\n` +
-            `💰 Patrimônio: C$ ${pontuacao.patrimonio}`
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('cron cartola:', message);
-        await sendMessage(
-          `⚽ *Cartola FC* — Não foi possível buscar sua pontuação automaticamente.\n\nDigite "minha pontuação no cartola" para tentar manualmente.`
-        );
-      }
+      console.log('cron: verificando comunicados da escola (17h)...');
+      await verificarComunicadosEscola();
     },
     { timezone: 'America/Sao_Paulo' }
   );
-
-  // 3x ao dia (7h, 13h, 18h): verifica comunicados da escola do Lucas
-  for (const hora of [7, 13, 18]) {
-    cron.schedule(
-      `0 ${hora} * * *`,
-      async () => {
-        console.log(`cron: verificando comunicados da escola (${hora}h)...`);
-        await verificarComunicadosEscola();
-      },
-      { timezone: 'America/Sao_Paulo' }
-    );
-  }
 
   // Seg a sex às 6:30: saldo da lanchonete do Lucas (Eat Simple)
   cron.schedule(
@@ -72,8 +36,8 @@ export function scheduleCrons(): void {
       try {
         const s = await consultarSaldo();
         await sendMessage(
-          `🍔 *Lanchonete da escola — ${s.aluno}*\n\n` +
-            `💰 Saldo: *${s.saldo}*\n` +
+          `🍔 Lanchonete da escola — ${s.aluno}\n\n` +
+            `💰 Saldo: ${s.saldo}\n` +
             `🕕 Consultado em ${s.atualizadoEm}`
         );
       } catch (err) {

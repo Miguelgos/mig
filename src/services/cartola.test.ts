@@ -10,12 +10,9 @@ describe('cartola', () => {
   });
 
   describe('statusMercado', () => {
-    it('retorna status aberto quando id === 1', async () => {
+    it('retorna status aberto quando status_mercado === 1', async () => {
       mockedAxios.get = vi.fn().mockResolvedValue({
-        data: {
-          rodada: { rodada_atual: 5 },
-          status_mercado: { id: 1, nome: 'Mercado aberto' },
-        },
+        data: { rodada_atual: 5, status_mercado: 1 },
       });
 
       const { statusMercado } = await import('./cartola');
@@ -26,18 +23,16 @@ describe('cartola', () => {
       expect(result.status).toBe('Mercado aberto');
     });
 
-    it('retorna status fechado quando id !== 1', async () => {
+    it('retorna status fechado quando status_mercado !== 1', async () => {
       mockedAxios.get = vi.fn().mockResolvedValue({
-        data: {
-          rodada: { rodada_atual: 5 },
-          status_mercado: { id: 2, nome: 'Mercado fechado' },
-        },
+        data: { rodada_atual: 5, status_mercado: 2 },
       });
 
       const { statusMercado } = await import('./cartola');
       const result = await statusMercado();
 
       expect(result.aberto).toBe(false);
+      expect(result.status).toBe('Mercado fechado');
     });
 
     it('lança erro quando a API falha', async () => {
@@ -50,10 +45,8 @@ describe('cartola', () => {
 
   describe('sugerirTime', () => {
     it('seleciona jogadores prováveis (status_id 7) dentro do orçamento', async () => {
-      mockedAxios.get = vi.fn().mockResolvedValue({
-        data: {
-          rodada_atual: 5,
-          atletas: [
+      const atletasData = {
+        atletas: [
             { atleta_id: 1, apelido: 'Goleiro A', clube_id: 1, posicao_id: 1, status_id: 7, preco_num: 10, media_num: 8 },
             { atleta_id: 2, apelido: 'Goleiro B', clube_id: 2, posicao_id: 1, status_id: 2, preco_num: 5, media_num: 9 }, // não provável
             { atleta_id: 3, apelido: 'Lateral A', clube_id: 1, posicao_id: 2, status_id: 7, preco_num: 8, media_num: 7 },
@@ -72,8 +65,10 @@ describe('cartola', () => {
             '2': { nome: 'Palmeiras', abreviacao: 'PAL' },
             '3': { nome: 'Corinthians', abreviacao: 'COR' },
           },
-        },
-      });
+      };
+      mockedAxios.get = vi.fn()
+        .mockResolvedValueOnce({ data: atletasData })
+        .mockResolvedValueOnce({ data: { rodada_atual: 5, status_mercado: 1 } });
 
       const { sugerirTime } = await import('./cartola');
       const result = await sugerirTime(100);
